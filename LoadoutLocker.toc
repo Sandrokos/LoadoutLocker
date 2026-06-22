@@ -1,0 +1,11 @@
+## Interface: 120007
+## Title: LoadoutLocker
+## Notes: Saves and restores gear sets per talent loadout.
+## Author: tidus
+## Version: 1.3.0
+## SavedVariablesPerCharacter: LoadoutLockerDB
+
+db.lua
+Gear.lua
+Main.lua
+UI.lua
