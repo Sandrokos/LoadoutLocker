@@ -95,7 +95,7 @@ function Constants.GetTertiarySettingLabel(field)
     return entry and entry.setting or field
 end
 
-Constants.DB_SCHEMA_VERSION = 2
+Constants.DB_SCHEMA_VERSION = 3
 
 Constants.DIALOG_BACKDROP = {
     bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",

@@ -55,7 +55,7 @@ function Items.GetGemSlotCount(itemLink, itemID)
         end
     end
 
-    return 4
+    return 0
 end
 
 local linkModsCache = {}

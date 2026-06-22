@@ -49,17 +49,23 @@ local function GetEntryModifiers(entry)
         }
     end
 
+    if entry.itemLink then
+        local mods = Items.ParseItemLinkModifiers(entry.itemLink)
+        if mods then
+            return {
+                itemID = entry.itemID or mods.itemID,
+                enchantID = mods.enchantID,
+                gems = Items.CopyGemsTable(mods.gems) or {},
+            }
+        end
+    end
+
     if entry.enchantID or entry.gems then
         return {
             itemID = entry.itemID,
             enchantID = entry.enchantID or 0,
             gems = Items.CopyGemsTable(entry.gems) or {},
         }
-    end
-
-    local mods = Items.ParseItemLinkModifiers(entry.itemLink)
-    if mods then
-        return mods
     end
 
     return {
@@ -85,10 +91,12 @@ local function ItemLinkEquals(linkA, linkB)
     return linkA and linkB and linkA == linkB
 end
 
-local function ItemLinkMatchesEntry(itemLink, entry, entryMods)
+local function ItemLinkMatchesEntry(itemLink, entry, entryMods, options)
     if not itemLink or not entry then
         return false
     end
+
+    options = options or {}
 
     if type(entry) == "table" and ItemLinkEquals(itemLink, entry.itemLink) then
         return true
@@ -108,15 +116,47 @@ local function ItemLinkMatchesEntry(itemLink, entry, entryMods)
         return false
     end
 
-    local savedLevel = Items.GetSavedItemLevel(entry)
-    if savedLevel > 0 then
-        local candidateLevel = Items.GetItemLevel(itemLink)
-        if candidateLevel > 0 and candidateLevel ~= savedLevel then
-            return false
+    if options.matchSavedLevel then
+        local savedLevel = Items.GetSavedItemLevel(entry)
+        if savedLevel > 0 then
+            local candidateLevel = Items.GetItemLevel(itemLink)
+            if candidateLevel > 0 and candidateLevel ~= savedLevel then
+                return false
+            end
         end
     end
 
     return true
+end
+
+local function SlotEntryMatchesEquipped(invSlot, entry)
+    local itemLink = GetInventoryItemLink("player", invSlot)
+    if not itemLink or not entry then
+        return false
+    end
+
+    if ItemLinkMatchesEntry(itemLink, entry) then
+        return true
+    end
+
+    local itemID = GetInventoryItemID("player", invSlot)
+    local entryItemID = type(entry) == "table" and entry.itemID or entry
+    if not itemID or itemID ~= entryItemID then
+        return false
+    end
+
+    if type(entry) == "table" and entry.itemLink and not EntryRequiresModifierMatch(entry) then
+        return true
+    end
+
+    local linkMods = Items.ParseItemLinkModifiers(itemLink)
+    local entryMods = GetEntryModifiers(entry)
+    if not linkMods or linkMods.itemID ~= entryMods.itemID then
+        return false
+    end
+
+    return (linkMods.enchantID or 0) == (entryMods.enchantID or 0)
+        and Items.GemsMatch(linkMods.gems, entryMods.gems)
 end
 
 local function SnapshotEquippedGear()
@@ -244,7 +284,7 @@ local function SlotSatisfiesTarget(invSlot, targetEntry)
         return not GetInventoryItemID("player", invSlot)
     end
 
-    return ItemLinkMatchesEntry(GetInventoryItemLink("player", invSlot), targetEntry)
+    return SlotEntryMatchesEquipped(invSlot, targetEntry)
 end
 
 local function MergeGearSnapshot(snapshot, expectedGearSet)
@@ -257,7 +297,7 @@ local function MergeGearSnapshot(snapshot, expectedGearSet)
         local equippedID = GetInventoryItemID("player", invSlot)
         local equippedLink = GetInventoryItemLink("player", invSlot)
 
-        if equippedID and entry and ItemLinkMatchesEntry(equippedLink, entry) then
+        if equippedID and entry and SlotEntryMatchesEquipped(invSlot, entry) then
             snapshot[invSlot] = Items.ToGearEntry({ itemID = equippedID, itemLink = equippedLink })
         elseif type(entry) == "table" and entry.itemLink then
             snapshot[invSlot] = Items.ToGearEntry({ itemID = entry.itemID, itemLink = entry.itemLink })
@@ -306,7 +346,7 @@ local function ShouldUnequipSlot(invSlot, gearSet, neededItems)
 
     local targetItem, targetBag, targetSlot, targetLink = ResolveGearEntry(gearEntry)
     if targetItem then
-        if ItemLinkMatchesEntry(currentLink, gearEntry) then
+        if ItemLinkMatchesEntry(currentLink, gearEntry) or SlotEntryMatchesEquipped(invSlot, gearEntry) then
             return false
         end
 
@@ -434,6 +474,7 @@ local function FindItemInBags(itemID, itemLink, usedLocations, gearEntry, bagSta
     local requireModifier = gearEntry and EntryRequiresModifierMatch(gearEntry)
     local entryMods = gearEntry and GetEntryModifiers(gearEntry)
     local canSearchByModifiers = entryMods and entryMods.itemID
+    local levelMatchOptions = savedLevel > 0 and { matchSavedLevel = true } or nil
 
     local function considerLocation(location)
         if linkMatch or exactModifierMatch then
@@ -447,7 +488,7 @@ local function FindItemInBags(itemID, itemLink, usedLocations, gearEntry, bagSta
 
         local link = location.itemLink
         if link then
-            if gearEntry and ItemLinkMatchesEntry(link, gearEntry, entryMods) then
+            if gearEntry and ItemLinkMatchesEntry(link, gearEntry, entryMods, levelMatchOptions) then
                 linkMatch = { "bag", location.bag, location.slot, locationKey }
                 return
             end
@@ -463,7 +504,7 @@ local function FindItemInBags(itemID, itemLink, usedLocations, gearEntry, bagSta
                     return
                 end
 
-                if ItemLinkMatchesEntry(link, gearEntry, entryMods) then
+                if ItemLinkMatchesEntry(link, gearEntry, entryMods, levelMatchOptions) then
                     local distance = 0
                     if savedLevel > 0 then
                         local level = Items.GetItemLevel(link)
@@ -572,7 +613,7 @@ local function NeedsEquipForEntry(invSlot, gearEntry)
     end
 
     local equippedLink = GetInventoryItemLink("player", invSlot)
-    if ItemLinkMatchesEntry(equippedLink, gearEntry) then
+    if SlotEntryMatchesEquipped(invSlot, gearEntry) then
         return false
     end
 
@@ -605,8 +646,7 @@ local function EquipSlot(invSlot, gearEntry, usedLocations, bagState)
         return true
     end
 
-    local equippedLink = GetInventoryItemLink("player", invSlot)
-    if ItemLinkMatchesEntry(equippedLink, gearEntry) then
+    if SlotEntryMatchesEquipped(invSlot, gearEntry) then
         return true
     end
 
@@ -699,11 +739,17 @@ local function RunGearSwap(gearSet, onComplete, gearDiff)
         end
     end
 
-    local function VerifyAndComplete()
+    local function VerifyAndComplete(attempt)
+        attempt = attempt or 1
         C_Timer.After(C.SAVE_RETRY_DELAY, function()
             local remaining = Gear.BuildGearDiff(gearSet)
             if remaining.empty then
                 FinishSwap(true)
+                return
+            end
+
+            if attempt < 2 then
+                VerifyAndComplete(attempt + 1)
                 return
             end
 

@@ -2,16 +2,18 @@
 
 Save your equipped gear to each talent loadout and automatically swap when you switch builds.
 
-Built for **World of Warcraft: Midnight** (Interface `120007`).
+Built for **World of Warcraft: Midnight** (Interface `120007`). Current version: **1.6.0**.
 
 ## Features
 
 - **Per-loadout gear sets** — each saved talent loadout can have its own gear snapshot
 - **Auto-equip on loadout change** — switching loadouts applies the linked gear set after talents commit
 - **Smart swapping** — two-phase unequip/equip handles embellished items and slot conflicts
-- **Combat-safe** — gear swaps queue until combat ends
 - **Talent UI button** — Save Gear button below the loadout dropdown on the talent panel
 - **Upgrade scan** — when applying a loadout, prompts if a same-name bag item is better (track, ilvl, or tertiary stats)
+- **In-game menu** — `/locker` opens Help, Priority, and Loadouts tabs
+- **Loadout management** — copy gear sets between loadouts, delete saved sets, clear ignored upgrade slots
+- **Options integration** — also listed under **Esc → Options → AddOns**
 
 ## Installation
 
@@ -43,11 +45,25 @@ Loadouts with no saved gear are left unchanged.
 
 When you switch loadouts (or run `/locker scan`), LoadoutLocker checks your bags for items with the **same name** as saved set pieces. You are prompted to use a better item when:
 
-1. **Higher upgrade track** — Myth > Hero > Champion > Veteran > Adventurer
+1. **Higher upgrade track** — Myth > Hero > Champion > Veteran > Adventurer (plus special tracks such as Sporefused and Ascendant Voidforged)
 2. **Same track, higher item level**
-3. **Same track and item level** — compares the full bonus profile: socket(s) plus tertiaries together, ranked Socket > Avoidance > Leech > Speed
+3. **Same track and item level** — compares bonus stats using your tertiary priority (default: Sockets > Avoidance > Leech > Speed)
 
 Accepting an upgrade updates the saved loadout gear and equips it.
+
+Use **Do not ask again** on a prompt to ignore that equipment slot for the current loadout. Manage ignored slots on the **Loadouts** tab, or turn off upgrade prompts entirely on the **Priority** tab.
+
+### Menu and settings
+
+| Command | Description |
+|---------|-------------|
+| `/locker` | Open the LoadoutLocker menu |
+| `/locker settings` | Open the menu to the Priority tab |
+| `/locker priority` | Same as `settings` |
+
+The **Priority** tab controls whether upgrade prompts run on loadout change and the order tertiary stats break ties.
+
+The **Loadouts** tab lets you delete a saved gear set, copy one loadout's gear to another, and clear ignored upgrade slots.
 
 ### Slash commands
 
@@ -59,11 +75,11 @@ Accepting an upgrade updates the saved loadout gear and equips it.
 | `/locker scan` | Check bags for better versions of saved loadout items |
 | `/locker help` | Show command help |
 
-`/loadoutlocker` is an alias for `/locker`.
+`/loadoutlocker` is an alias for `/locker`. `clear` works as an alias for `delete`.
 
 ## Limitations
 
-- **Starter Build** loadouts cannot be saved
+- **Starter Build** loadouts cannot be saved or used as a copy target
 - Requires enough bag space for gear swaps that need items moved out of equipment slots
 - Missing items are skipped with a chat message; other slots still swap
-- Gear swaps do not run in combat (queued until combat ends)
+- Gear swaps do not run in combat — the swap is cancelled if combat starts mid-swap
