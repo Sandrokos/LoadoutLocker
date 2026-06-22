@@ -34,7 +34,7 @@ local function HandleSlashCommand(msg)
     elseif msg == "delete" or msg == "clear" then
         Gear.Delete()
     elseif msg == "settings" or msg == "priority" then
-        Menu.Show()
+        Menu.Show("priority")
     else
         Print("Unknown command. Type /locker help for options.")
     end
@@ -56,7 +56,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
         DB:Initialize()
         Menu.RegisterWithSettings()
     elseif (event == "PLAYER_LOGIN" or event == "TRAIT_CONFIG_LIST_UPDATED") and not loginSynced then
-        if Gear.RecordCurrentLoadout() then
+        if LoadoutLocker.Loadout.RecordCurrent() then
             loginSynced = true
         end
     elseif event == "TRAIT_CONFIG_UPDATED" then

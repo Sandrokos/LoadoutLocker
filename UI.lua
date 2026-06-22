@@ -6,7 +6,8 @@ LoadoutLocker.UI = UI
 local C = LoadoutLocker.Constants
 local Gear = LoadoutLocker.Gear
 local DB = LoadoutLocker.DB
-local Talents = LoadoutLocker.Talents
+local Loadout = LoadoutLocker.Loadout
+local Items = LoadoutLocker.Items
 local Upgrades = LoadoutLocker.Upgrades
 
 local eventFrame = CreateFrame("Frame")
@@ -79,7 +80,7 @@ end
 
 local function SetItemPanel(panel, headerText, profile)
     panel.header:SetText(headerText)
-    panel.name:SetText(Upgrades.GetItemDisplayName(profile.itemID) or "Unknown Item")
+    panel.name:SetText(Items.GetDisplayName(profile.itemID) or "Unknown Item")
 
     local icon = Upgrades.GetItemIcon(profile.itemID, profile.itemLink)
     if icon then
@@ -129,14 +130,7 @@ local function EnsureUpgradeFrame()
     frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
     frame:Hide()
 
-    frame:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true,
-        tileSize = 32,
-        edgeSize = 32,
-        insets = { left = 11, right = 12, top = 12, bottom = 11 },
-    })
+    frame:SetBackdrop(C.DIALOG_BACKDROP)
 
     frame.title = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     frame.title:SetPoint("TOP", frame, "TOP", 0, -18)
@@ -200,7 +194,7 @@ function UI.ShowUpgradeOffer(offer, onRespond)
     frame.acceptButton:Enable()
     frame.declineButton:Enable()
     frame.doNotAskCheck:SetChecked(false)
-    frame.title:SetText(Upgrades.GetItemDisplayName(offer.candidate.itemID) or "Upgrade Found")
+    frame.title:SetText(Items.GetDisplayName(offer.candidate.itemID) or "Upgrade Found")
     frame.reason:SetText(offer.reason)
     SetItemPanel(frame.currentPanel, "Saved Item", offer.reference)
     SetItemPanel(frame.upgradePanel, "Upgrade", offer.candidate)
@@ -213,10 +207,6 @@ function UI.HideUpgradeOffer()
     if upgradeFrame then
         upgradeFrame:Hide()
     end
-end
-
-function UI.IsUpgradeOfferShown()
-    return upgradeFrame and upgradeFrame:IsShown()
 end
 
 local function GetTalentsFrame()
@@ -243,10 +233,10 @@ local function RefreshSaveButton(checkInspecting)
 
     saveButton:Show()
 
-    local specID = Talents.GetSpecID()
-    local configID = Talents.GetLoadoutConfigID(specID)
-    local loadoutName = configID and Talents.GetLoadoutName(configID)
-    local canSave = specID and configID and not Talents.IsStarterBuild(configID)
+    local specID = Loadout.GetSpecID()
+    local configID = Loadout.GetLoadoutConfigID(specID)
+    local loadoutName = configID and Loadout.GetLoadoutName(configID)
+    local canSave = specID and configID and not Loadout.IsStarterBuild(configID)
     local hasSaved = canSave and DB:HasGearSet(specID, configID)
 
     if canSave then
@@ -257,23 +247,9 @@ local function RefreshSaveButton(checkInspecting)
         saveButton:SetText("Save Gear")
     end
 
-    saveButton:SetScript("OnEnter", function()
-        GameTooltip:SetOwner(saveButton, "ANCHOR_RIGHT")
-        if not canSave then
-            GameTooltip:SetText("Select a saved talent loadout to store gear.", 1, 1, 1)
-        elseif hasSaved then
-            GameTooltip:SetText("Update saved gear for " .. loadoutName, 1, 1, 1)
-            GameTooltip:AddLine("Replaces the gear set linked to this talent loadout.", 1, 0.82, 0, true)
-        else
-            GameTooltip:SetText("Save current gear to " .. loadoutName, 1, 1, 1)
-            GameTooltip:AddLine("Gear will automatically equip when you switch to this loadout.", 1, 0.82, 0, true)
-        end
-        GameTooltip:Show()
-    end)
-
-    saveButton:SetScript("OnLeave", function()
-        GameTooltip:Hide()
-    end)
+    saveButton.canSave = canSave
+    saveButton.loadoutName = loadoutName
+    saveButton.hasSaved = hasSaved
 end
 
 local function ScheduleSaveButtonRefresh()
@@ -308,6 +284,22 @@ local function CreateSaveButton(frame)
     saveButton:SetText("Save Gear")
     saveButton:SetScript("OnClick", function()
         Gear.Save()
+    end)
+    saveButton:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        if not self.canSave then
+            GameTooltip:SetText("Select a saved talent loadout to store gear.", 1, 1, 1)
+        elseif self.hasSaved then
+            GameTooltip:SetText("Update saved gear for " .. self.loadoutName, 1, 1, 1)
+            GameTooltip:AddLine("Replaces the gear set linked to this talent loadout.", 1, 0.82, 0, true)
+        else
+            GameTooltip:SetText("Save current gear to " .. self.loadoutName, 1, 1, 1)
+            GameTooltip:AddLine("Gear will automatically equip when you switch to this loadout.", 1, 0.82, 0, true)
+        end
+        GameTooltip:Show()
+    end)
+    saveButton:SetScript("OnLeave", function()
+        GameTooltip:Hide()
     end)
 
     talentsFrame = frame

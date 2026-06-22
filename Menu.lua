@@ -120,7 +120,7 @@ local function RefreshPriorityRows()
         local row = priorityRows[index]
         if row then
             row.rank:SetText(index .. ".")
-            row.label:SetText(C.TERTIARY_SETTING_LABELS[field] or field)
+            row.label:SetText(C.GetTertiarySettingLabel(field))
             row.field = field
             row.upButton:SetEnabled(index > 1)
             row.downButton:SetEnabled(index < #priority)
@@ -530,14 +530,7 @@ local function EnsureMenuFrame()
     frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
     frame:Hide()
 
-    frame:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true,
-        tileSize = 32,
-        edgeSize = 32,
-        insets = { left = 11, right = 12, top = 12, bottom = 11 },
-    })
+    frame:SetBackdrop(C.DIALOG_BACKDROP)
 
     frame.title = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     frame.title:SetPoint("TOP", frame, "TOP", 0, -18)
@@ -589,17 +582,6 @@ function Menu.Show(tabID)
     selectedManageConfigID = Loadout.GetLoadoutConfigID()
     SelectTab(tabID or activeTab or "help")
     frame:Show()
-end
-
-function Menu.Toggle(tabID)
-    local frame = EnsureMenuFrame()
-    if frame:IsShown() then
-        frame:Hide()
-    else
-        selectedManageConfigID = Loadout.GetLoadoutConfigID()
-        SelectTab(tabID or activeTab or "help")
-        frame:Show()
-    end
 end
 
 function Menu.IsShown()

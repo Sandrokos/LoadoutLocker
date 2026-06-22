@@ -2,8 +2,6 @@ LoadoutLocker = LoadoutLocker or {}
 
 local Loadout = {}
 LoadoutLocker.Loadout = Loadout
-LoadoutLocker.Talents = Loadout
-
 local C = LoadoutLocker.Constants
 local DB = LoadoutLocker.DB
 

@@ -10,7 +10,6 @@ Constants.STARTER_BUILD_CONFIG_ID = (
 ) or -2
 
 Constants.TALENT_UI_ADDON = "Blizzard_PlayerSpells"
-LoadoutLocker.TALENT_UI_ADDON = Constants.TALENT_UI_ADDON
 
 Constants.EQUIP_SLOT_DELAY = 0.15
 Constants.LOADOUT_APPLY_DELAY = 0.25
@@ -58,7 +57,7 @@ Constants.INV_SLOT_LABELS = {
 }
 
 function Constants.GetSlotLabel(invSlot)
-    invSlot = tonumber(invSlot) or invSlot
+    invSlot = LoadoutLocker.Gear.NormalizeInvSlot(invSlot)
     return Constants.INV_SLOT_LABELS[invSlot] or ("Slot " .. tostring(invSlot))
 end
 
@@ -79,18 +78,32 @@ Constants.TERTIARY_FIELDS = {
     speed = true,
 }
 
-Constants.TERTIARY_LABELS = {
-    sockets = "socket",
-    avoidance = "Avoidance",
-    leech = "Leech",
-    speed = "Speed",
+Constants.TERTIARY = {
+    sockets = { tooltip = "socket", setting = "Sockets" },
+    avoidance = { tooltip = "Avoidance", setting = "Avoidance" },
+    leech = { tooltip = "Leech", setting = "Leech" },
+    speed = { tooltip = "Speed", setting = "Speed" },
 }
 
-Constants.TERTIARY_SETTING_LABELS = {
-    sockets = "Sockets",
-    avoidance = "Avoidance",
-    leech = "Leech",
-    speed = "Speed",
+function Constants.GetTertiaryTooltipLabel(field)
+    local entry = Constants.TERTIARY[field]
+    return entry and entry.tooltip or field
+end
+
+function Constants.GetTertiarySettingLabel(field)
+    local entry = Constants.TERTIARY[field]
+    return entry and entry.setting or field
+end
+
+Constants.DB_SCHEMA_VERSION = 2
+
+Constants.DIALOG_BACKDROP = {
+    bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+    edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+    tile = true,
+    tileSize = 32,
+    edgeSize = 32,
+    insets = { left = 11, right = 12, top = 12, bottom = 11 },
 }
 
 Constants.TERTIARY_STAT_KEYS = {

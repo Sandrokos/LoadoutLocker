@@ -8,8 +8,6 @@ local Items = LoadoutLocker.Items
 local Gear = LoadoutLocker.Gear
 local DB = LoadoutLocker.DB
 
-local scanTooltip
-
 local offerState = {
     callback = nil,
     gearSet = nil,
@@ -25,9 +23,7 @@ local ShowNextOffer
 local AcceptCurrentOffer
 local RespondToOffer
 
-local function GetTertiaryPriority()
-    return DB:GetTertiaryPriority()
-end
+local TOOLTIP_FRAME = "LoadoutLockerUpgradeScanTooltip"
 
 local function IterGearSetSlots(gearSet)
     local slots = {}
@@ -59,12 +55,12 @@ AcceptCurrentOffer = function()
     Gear.SetGearSetEntry(
         offerState.gearSet,
         currentOffer.invSlot,
-        Items.ToGearEntryFromLink(
-            candidate.itemID,
-            candidate.itemLink,
-            candidate.bag,
-            candidate.slot
-        )
+        Items.ToGearEntry({
+            itemID = candidate.itemID,
+            itemLink = candidate.itemLink,
+            bag = candidate.bag,
+            slot = candidate.slot,
+        })
     )
 
     offerState.changed = true
@@ -94,10 +90,6 @@ RespondToOffer = function(accepted, doNotAskAgain)
     C_Timer.After(C.OFFER_ADVANCE_DELAY, ShowNextOffer)
 end
 
-function Upgrades.GetItemDisplayName(itemID)
-    return Items.GetDisplayName(itemID)
-end
-
 local function MatchTrackEntry(trackString, tierOnly)
     if not trackString or trackString == "" then
         return nil
@@ -111,12 +103,8 @@ local function MatchTrackEntry(trackString, tierOnly)
     end
 end
 
-local function GetExplicitTierEntry(trackString)
-    return MatchTrackEntry(trackString, true)
-end
-
 local function GetExplicitTierRank(trackString)
-    local entry = GetExplicitTierEntry(trackString)
+    local entry = MatchTrackEntry(trackString, true)
     return entry and entry[2] or nil
 end
 
@@ -132,7 +120,7 @@ local function GetTrackLabel(trackString)
 
     local familyEntry = MatchTrackEntry(trackString)
     if familyEntry and familyEntry[2] >= 10 then
-        local tierEntry = GetExplicitTierEntry(trackString)
+        local tierEntry = MatchTrackEntry(trackString, true)
         if tierEntry then
             return (familyEntry[3] or familyEntry[1]) .. ": " .. (tierEntry[3] or tierEntry[1])
         end
@@ -188,59 +176,14 @@ local function TracksAreSameFamily(trackA, trackB)
 end
 
 function Upgrades.GetItemIcon(itemID, itemLink)
-    if itemLink and C_Item.GetItemIconByID then
+    if itemID and C_Item.GetItemIconByID then
         return C_Item.GetItemIconByID(itemID)
     end
     return select(5, C_Item.GetItemInfo(itemID))
 end
 
-local function GetItemLevel(itemLink, itemLocation)
-    return Items.GetItemLevel(itemLink, itemLocation)
-end
-
 local function GetItemInfoCandidates(itemLink, itemID)
-    local candidates = {}
-
-    if type(itemLink) == "string" and itemLink ~= "" then
-        candidates[#candidates + 1] = itemLink
-
-        local itemString = string.match(itemLink, "item[%-?%d:]+")
-        if itemString and itemString ~= itemLink then
-            candidates[#candidates + 1] = itemString
-        end
-    end
-
-    if type(itemID) == "number" and itemID > 0 then
-        candidates[#candidates + 1] = itemID
-    end
-
-    return candidates
-end
-
-local function EnsureScanTooltip()
-    if scanTooltip then
-        return scanTooltip
-    end
-
-    scanTooltip = CreateFrame("GameTooltip", "LoadoutLockerUpgradeScanTooltip", UIParent, "GameTooltipTemplate")
-    scanTooltip:SetOwner(UIParent, "ANCHOR_NONE")
-    return scanTooltip
-end
-
-local function ForEachTooltipLine(callback)
-    local tooltip = EnsureScanTooltip()
-    for i = 1, tooltip:NumLines() do
-        for _, lineKey in ipairs({ "TextLeft", "TextRight" }) do
-            local line = _G["LoadoutLockerUpgradeScanTooltip" .. lineKey .. i]
-            local text = line and line:GetText()
-            if text then
-                local result = callback(text)
-                if result ~= nil then
-                    return result
-                end
-            end
-        end
-    end
+    return Items.GetItemInfoCandidates(itemLink, itemID)
 end
 
 local function GetGemDisplayName(gemID)
@@ -248,12 +191,7 @@ local function GetGemDisplayName(gemID)
         return nil
     end
 
-    local name = C_Item.GetItemNameByID and C_Item.GetItemNameByID(gemID)
-    if not name then
-        name = GetItemInfo(gemID)
-    end
-
-    return name or ("Gem " .. tostring(gemID))
+    return Items.GetDisplayName(gemID)
 end
 
 local function GetEnchantDisplayName(enchantID, itemLink)
@@ -285,11 +223,7 @@ local function GetEnchantDisplayName(enchantID, itemLink)
     end
 
     if itemLink then
-        local tooltip = EnsureScanTooltip()
-        tooltip:ClearLines()
-        tooltip:SetHyperlink(itemLink)
-
-        return ForEachTooltipLine(function(text)
+        return Items.ScanHyperlinkText(itemLink, TOOLTIP_FRAME, function(text)
             local enchanted = string.match(text, "^Enchanted: (.+)$")
             if enchanted then
                 return enchanted
@@ -361,7 +295,7 @@ end
 
 function Upgrades.FormatProfileDetails(profile)
     local parts = {
-        string.format("%s | ilvl %d", GetTrackLabel(profile.trackString), profile.itemLevel),
+        string.format("%s | ilvl %d", profile.trackLabel or GetTrackLabel(profile.trackString), profile.itemLevel),
     }
 
     local enchantLine = FormatEnchantLine(profile)
@@ -377,9 +311,9 @@ function Upgrades.FormatProfileDetails(profile)
     end
 
     local bonusParts = {}
-    for _, field in ipairs(GetTertiaryPriority()) do
+    for _, field in ipairs(DB:GetTertiaryPriority()) do
         if field ~= "sockets" and profile[field] > 0 then
-            bonusParts[#bonusParts + 1] = C.TERTIARY_LABELS[field]
+            bonusParts[#bonusParts + 1] = C.GetTertiaryTooltipLabel(field)
         end
     end
 
@@ -395,12 +329,8 @@ local function MatchStandardTrackFromText(text)
         return nil
     end
 
-    local lower = string.lower(text)
-    for _, entry in ipairs(C.TRACK_RANK) do
-        if entry[2] < 10 and string.find(lower, entry[1], 1, true) then
-            return entry[3] or entry[1]
-        end
-    end
+    local entry = MatchTrackEntry(text, true)
+    return entry and (entry[3] or entry[1])
 end
 
 local function ScanTooltipForUpgradeTrack(itemLink)
@@ -408,11 +338,7 @@ local function ScanTooltipForUpgradeTrack(itemLink)
         return nil
     end
 
-    local tooltip = EnsureScanTooltip()
-    tooltip:ClearLines()
-    tooltip:SetHyperlink(itemLink)
-
-    return ForEachTooltipLine(function(text)
+    return Items.ScanHyperlinkText(itemLink, TOOLTIP_FRAME, function(text)
         for _, marker in ipairs(C.TRACK_SCAN_MARKERS) do
             local familyLabel = marker[2]
             local tier = string.match(text, familyLabel .. "%s*:%s*(%S+)")
@@ -430,16 +356,7 @@ end
 
 local function GetUpgradeTrack(itemLink, itemID, itemLocation)
     local upgradeInfo
-    local linkCandidates = {}
-
-    if type(itemLink) == "string" and itemLink ~= "" then
-        linkCandidates[#linkCandidates + 1] = itemLink
-
-        local itemString = string.match(itemLink, "item[%-?%d:]+")
-        if itemString and itemString ~= itemLink then
-            linkCandidates[#linkCandidates + 1] = itemString
-        end
-    end
+    local linkCandidates = GetItemInfoCandidates(itemLink, itemID)
 
     local function trackFromUpgradeInfo(info)
         if info and info.trackString and info.trackString ~= "" then
@@ -515,29 +432,20 @@ local function ApplySavedEntryStats(profile, gearEntry)
         profile.itemLevel = savedLevel
     end
 
-    if gearEntry.itemLink then
+    if gearEntry.itemLink and (not profile.trackString or profile.trackString == "") then
         local savedTrack = GetUpgradeTrack(gearEntry.itemLink, gearEntry.itemID)
         if savedTrack and savedTrack ~= "" then
             profile.trackString = savedTrack
+            profile.namedTrackRank = GetTrackRank(savedTrack)
+            profile.explicitTierRank = GetExplicitTierRank(savedTrack)
+            profile.trackLabel = GetTrackLabel(savedTrack)
+            profile.comparableTrackRank = GetComparableTrackRank(profile)
         end
+    elseif savedLevel > 0 then
+        profile.comparableTrackRank = GetComparableTrackRank(profile)
     end
 
     return profile
-end
-
-local function CountSockets(itemLink, itemID)
-    if not C_Item.GetItemNumSockets then
-        return 0
-    end
-
-    for _, itemInfo in ipairs(GetItemInfoCandidates(itemLink, itemID)) do
-        local ok, socketCount = pcall(C_Item.GetItemNumSockets, itemInfo)
-        if ok and type(socketCount) == "number" then
-            return socketCount
-        end
-    end
-
-    return 0
 end
 
 local function GetStatValue(stats, keys)
@@ -586,7 +494,7 @@ local function TooltipTextHasTertiaryStat(text, field)
         return false
     end
 
-    local marker = C.TERTIARY_LABELS[field]
+    local marker = C.GetTertiaryTooltipLabel(field)
     if not marker or field == "sockets" then
         return false
     end
@@ -640,15 +548,9 @@ local function ScanTooltipForTertiaries(itemLink)
         return stats
     end
 
-    local tooltip = EnsureScanTooltip()
-    tooltip:ClearLines()
-    tooltip:SetHyperlink(itemLink)
-
-    for i = 1, tooltip:NumLines() do
-        local left = _G["LoadoutLockerUpgradeScanTooltipTextLeft" .. i]
-        local right = _G["LoadoutLockerUpgradeScanTooltipTextRight" .. i]
-        considerLine(left and left:GetText(), right and right:GetText())
-    end
+    Items.ForEachHyperlinkTooltipLine(itemLink, TOOLTIP_FRAME, function(leftText, rightText)
+        considerLine(leftText, rightText)
+    end)
 
     return stats
 end
@@ -667,9 +569,7 @@ local function GetTertiaryStats(itemLink, itemID, itemLocation)
         end
     end
 
-    if not itemLink and itemID then
-        itemLink = select(2, C_Item.GetItemInfo(itemID))
-    end
+    itemLink = Items.ResolveItemLink(itemID, itemLink)
 
     if not itemLink then
         return stats
@@ -679,6 +579,9 @@ local function GetTertiaryStats(itemLink, itemID, itemLocation)
     if itemStats then
         for field, keys in pairs(C.TERTIARY_STAT_KEYS) do
             stats[field] = GetStatValue(itemStats, keys)
+        end
+        if stats.avoidance > 0 and stats.leech > 0 and stats.speed > 0 then
+            return stats
         end
     end
 
@@ -728,30 +631,36 @@ local function BuildItemProfile(itemIDOrLocation, itemLink, bag, slot, invSlot)
         itemLink = C_Item.GetItemLink(itemLocation)
     end
 
-    if not itemLink and itemID then
-        itemLink = select(2, C_Item.GetItemInfo(itemID))
-    end
+    itemLink = Items.ResolveItemLink(itemID, itemLink)
 
     local tertiary = GetTertiaryStats(itemLink, itemID, itemLocation)
     local trackString = GetUpgradeTrack(itemLink, itemID, itemLocation)
 
-    return {
+    local profile = {
         itemID = itemID,
         itemLink = itemLink,
         bag = bag,
         slot = slot,
         invSlot = invSlot,
-        itemLevel = GetItemLevel(itemLink, itemLocation),
+        itemLevel = Items.GetItemLevel(itemLink, itemLocation),
         trackString = trackString,
-        sockets = CountSockets(itemLink, itemID),
+        sockets = Items.GetGemSlotCount(itemLink, itemID),
         avoidance = tertiary.avoidance,
         leech = tertiary.leech,
         speed = tertiary.speed,
     }
+
+    profile.comparableTrackRank = GetComparableTrackRank(profile)
+    profile.namedTrackRank = GetTrackRank(trackString)
+    profile.explicitTierRank = GetExplicitTierRank(trackString)
+    profile.trackLabel = GetTrackLabel(trackString)
+    profile.displayName = Items.GetDisplayName(itemID)
+
+    return profile
 end
 
 local function IsBetterBonusProfile(candidate, reference)
-    for _, field in ipairs(GetTertiaryPriority()) do
+    for _, field in ipairs(DB:GetTertiaryPriority()) do
         local candidateValue = candidate[field]
         local referenceValue = reference[field]
         if candidateValue ~= referenceValue then
@@ -783,8 +692,8 @@ local function IsBetterItem(candidate, reference)
         return false
     end
 
-    local candidateTrack = GetComparableTrackRank(candidate)
-    local referenceTrack = GetComparableTrackRank(reference)
+    local candidateTrack = candidate.comparableTrackRank
+    local referenceTrack = reference.comparableTrackRank
     if candidateTrack ~= referenceTrack then
         return candidateTrack > referenceTrack
     end
@@ -794,18 +703,16 @@ local function IsBetterItem(candidate, reference)
     end
 
     if TracksAreSameFamily(candidate.trackString, reference.trackString) then
-        local candidateTier = GetExplicitTierRank(candidate.trackString)
-        local referenceTier = GetExplicitTierRank(reference.trackString)
+        local candidateTier = candidate.explicitTierRank
+        local referenceTier = reference.explicitTierRank
         if candidateTier and referenceTier and candidateTier ~= referenceTier then
             return candidateTier > referenceTier
         end
         return false
     end
 
-    local candidateNamedRank = GetTrackRank(candidate.trackString)
-    local referenceNamedRank = GetTrackRank(reference.trackString)
-    if candidateNamedRank ~= referenceNamedRank then
-        return candidateNamedRank > referenceNamedRank
+    if candidate.namedTrackRank ~= reference.namedTrackRank then
+        return candidate.namedTrackRank > reference.namedTrackRank
     end
 
     return IsBetterBonusProfile(candidate, reference)
@@ -833,7 +740,7 @@ local function ProfileMatchesSavedEntry(itemLink, gearEntry)
 
     local savedLevel = Items.GetSavedItemLevel(gearEntry)
     if savedLevel > 0 and itemLink then
-        local level = GetItemLevel(itemLink)
+        local level = Items.GetItemLevel(itemLink)
         return level > 0 and level == savedLevel
     end
 
@@ -844,6 +751,24 @@ local function FindReferenceProfile(savedItemID, invSlot, savedItemLink, gearEnt
     local savedLink = savedItemLink or GetSavedItemLink(gearEntry)
 
     if savedLink then
+        if playerProfiles then
+            for _, itemProfile in ipairs(playerProfiles) do
+                if itemProfile.itemLink == savedLink then
+                    return ApplySavedEntryStats(itemProfile, gearEntry)
+                end
+            end
+
+            if invSlot then
+                for _, itemProfile in ipairs(playerProfiles) do
+                    if itemProfile.invSlot == invSlot
+                        and ProfileMatchesSavedEntry(itemProfile.itemLink, gearEntry)
+                        and Items.MatchesFamily(savedItemID, itemProfile.itemID) then
+                        return ApplySavedEntryStats(itemProfile, gearEntry)
+                    end
+                end
+            end
+        end
+
         return ApplySavedEntryStats(BuildItemProfile(savedItemID, savedLink), gearEntry)
     end
 
@@ -903,7 +828,7 @@ local function FindReferenceProfile(savedItemID, invSlot, savedItemLink, gearEnt
     end
 
     if not profile then
-        profile = BuildItemProfile(savedItemID, select(2, C_Item.GetItemInfo(savedItemID)))
+        profile = BuildItemProfile(savedItemID, Items.ResolveItemLink(savedItemID))
     end
 
     return ApplySavedEntryStats(profile, gearEntry)
@@ -928,15 +853,16 @@ local function ConsiderUpgradeCandidate(profile, referenceProfile, reservedInsta
 end
 
 local function FindBestUpgrade(savedItemID, referenceProfile, reservedInstances, targetInvSlot, playerProfiles)
-    if not Items.GetDisplayName(savedItemID) or not playerProfiles then
+    if not referenceProfile.displayName or not playerProfiles then
         return nil
     end
 
     reservedInstances = reservedInstances or {}
     local bestCandidate
+    local savedName = referenceProfile.displayName
 
     local function consider(profile)
-        if Items.MatchesFamily(savedItemID, profile.itemID) then
+        if profile.displayName == savedName or Items.MatchesFamily(savedItemID, profile.itemID) then
             bestCandidate = ConsiderUpgradeCandidate(
                 profile,
                 referenceProfile,
@@ -965,21 +891,16 @@ end
 
 local function DescribeUpgradeReason(candidate, reference)
     local reasons = {}
-    local candidateComparable = GetComparableTrackRank(candidate)
-    local referenceComparable = GetComparableTrackRank(reference)
+    local candidateComparable = candidate.comparableTrackRank
+    local referenceComparable = reference.comparableTrackRank
 
-    if candidateComparable > referenceComparable then
+    if candidateComparable > referenceComparable
+        or (candidateComparable == referenceComparable
+            and candidate.trackLabel ~= reference.trackLabel) then
         reasons[#reasons + 1] = string.format(
             "higher track (%s > %s)",
-            GetTrackLabel(candidate.trackString),
-            GetTrackLabel(reference.trackString)
-        )
-    elseif candidateComparable == referenceComparable
-        and GetTrackLabel(candidate.trackString) ~= GetTrackLabel(reference.trackString) then
-        reasons[#reasons + 1] = string.format(
-            "higher track (%s > %s)",
-            GetTrackLabel(candidate.trackString),
-            GetTrackLabel(reference.trackString)
+            candidate.trackLabel,
+            reference.trackLabel
         )
     end
 
@@ -989,14 +910,14 @@ local function DescribeUpgradeReason(candidate, reference)
 
     if candidateComparable == referenceComparable
         and candidate.itemLevel == reference.itemLevel then
-        for _, field in ipairs(GetTertiaryPriority()) do
+        for _, field in ipairs(DB:GetTertiaryPriority()) do
             if candidate[field] > reference[field] then
                 if field == "sockets" then
                     reasons[#reasons + 1] = candidate.sockets > 1 and "extra sockets" or "extra socket"
                 elseif reference[field] > 0 then
-                    reasons[#reasons + 1] = "more " .. C.TERTIARY_LABELS[field]
+                    reasons[#reasons + 1] = "more " .. C.GetTertiaryTooltipLabel(field)
                 else
-                    reasons[#reasons + 1] = C.TERTIARY_LABELS[field]
+                    reasons[#reasons + 1] = C.GetTertiaryTooltipLabel(field)
                 end
             end
         end
@@ -1020,7 +941,7 @@ function Upgrades.FindOffers(gearSet, options)
     local offers = {}
     local reservedInstances = {}
     local offeredSlots = {}
-    local playerProfiles = Items.CollectPlayerProfiles()
+    local playerProfiles = Items.CollectPlayerProfiles(gearSet)
 
     for _, invSlot in ipairs(IterGearSetSlots(gearSet)) do
         local normalizedSlot = Gear.NormalizeInvSlot(invSlot)

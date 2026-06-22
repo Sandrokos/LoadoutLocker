@@ -47,15 +47,7 @@ end
 
 function Items.GetGemSlotCount(itemLink, itemID)
     if C_Item and C_Item.GetItemNumSockets then
-        local candidates = {}
-        if itemLink then
-            candidates[#candidates + 1] = itemLink
-        end
-        if itemID then
-            candidates[#candidates + 1] = itemID
-        end
-
-        for _, itemInfo in ipairs(candidates) do
+        for _, itemInfo in ipairs(Items.GetItemInfoCandidates(itemLink, itemID)) do
             local ok, socketCount = pcall(C_Item.GetItemNumSockets, itemInfo)
             if ok and type(socketCount) == "number" and socketCount >= 0 then
                 return socketCount
@@ -66,72 +58,115 @@ function Items.GetGemSlotCount(itemLink, itemID)
     return 4
 end
 
-local embellishCache = {}
-local scanTooltip
+local linkModsCache = {}
+local scanTooltips = {}
+local TOOLTIP_LINE_KEYS = { "TextLeft", "TextRight" }
 
-local EMBELLISH_TEXT_MARKERS = {
-    "Embellish",
-}
+function Items.GetItemInfoCandidates(itemLink, itemID)
+    local candidates = {}
 
-local function EnsureScanTooltip()
-    if scanTooltip then
-        return scanTooltip
-    end
+    if type(itemLink) == "string" and itemLink ~= "" then
+        candidates[#candidates + 1] = itemLink
 
-    scanTooltip = CreateFrame("GameTooltip", "LoadoutLockerItemsScanTooltip", UIParent, "GameTooltipTemplate")
-    scanTooltip:SetOwner(UIParent, "ANCHOR_NONE")
-    return scanTooltip
-end
-
-local function TooltipLineMentionsEmbellishment(text)
-    if not text or text == "" then
-        return false
-    end
-
-    for _, marker in ipairs(EMBELLISH_TEXT_MARKERS) do
-        if text:find(marker, 1, true) then
-            return true
+        local itemString = string.match(itemLink, "item[%-?%d:]+")
+        if itemString and itemString ~= itemLink then
+            candidates[#candidates + 1] = itemString
         end
     end
 
-    return false
+    if type(itemID) == "number" and itemID > 0 then
+        candidates[#candidates + 1] = itemID
+    end
+
+    return candidates
 end
 
-local function ScanHyperlinkEmbellishment(itemLink)
-    if C_TooltipInfo and itemLink and C_TooltipInfo.GetHyperlink then
+function Items.ResolveItemLink(itemID, itemLink)
+    if itemLink then
+        return itemLink
+    end
+
+    if itemID then
+        return select(2, C_Item.GetItemInfo(itemID))
+    end
+end
+
+function Items.EnsureScanTooltip(frameName)
+    frameName = frameName or "LoadoutLockerScanTooltip"
+    if scanTooltips[frameName] then
+        return scanTooltips[frameName]
+    end
+
+    local tooltip = CreateFrame("GameTooltip", frameName, UIParent, "GameTooltipTemplate")
+    tooltip:SetOwner(UIParent, "ANCHOR_NONE")
+    scanTooltips[frameName] = tooltip
+    return tooltip
+end
+
+function Items.ForEachHyperlinkTooltipLine(itemLink, frameName, callback)
+    if not itemLink or not callback then
+        return
+    end
+
+    if C_TooltipInfo and C_TooltipInfo.GetHyperlink then
         local ok, info = pcall(C_TooltipInfo.GetHyperlink, itemLink)
         if ok and info and info.lines then
             for _, line in ipairs(info.lines) do
-                if TooltipLineMentionsEmbellishment(line.leftText)
-                    or TooltipLineMentionsEmbellishment(line.rightText) then
-                    return true
+                local result = callback(line.leftText, line.rightText, line.type)
+                if result ~= nil then
+                    return result
                 end
             end
         end
     end
 
-    local tooltip = EnsureScanTooltip()
+    local tooltip = Items.EnsureScanTooltip(frameName)
     tooltip:ClearLines()
     tooltip:SetHyperlink(itemLink)
 
-    for i = 2, tooltip:NumLines() do
-        local left = _G["LoadoutLockerItemsScanTooltipTextLeft" .. i]
-        local right = _G["LoadoutLockerItemsScanTooltipTextRight" .. i]
-        local leftText = left and left:GetText() or ""
-        local rightText = right and right:GetText() or ""
+    for i = 1, tooltip:NumLines() do
+        for _, lineKey in ipairs(TOOLTIP_LINE_KEYS) do
+            local line = _G[frameName .. lineKey .. i]
+            local text = line and line:GetText()
+            if text then
+                local result = callback(text)
+                if result ~= nil then
+                    return result
+                end
+            end
+        end
+    end
+end
+
+function Items.ScanHyperlinkText(itemLink, frameName, textCallback)
+    return Items.ForEachHyperlinkTooltipLine(itemLink, frameName, function(leftText, rightText)
+        for _, text in ipairs({ leftText, rightText }) do
+            if text then
+                local result = textCallback(text)
+                if result ~= nil then
+                    return result
+                end
+            end
+        end
+    end)
+end
+
+local function TooltipLineMentionsEmbellishment(text)
+    return text and text ~= "" and text:find("Embellish", 1, true) ~= nil
+end
+
+local function ScanHyperlinkEmbellishment(itemLink)
+    return Items.ForEachHyperlinkTooltipLine(itemLink, "LoadoutLockerItemsScanTooltip", function(leftText, rightText)
         if TooltipLineMentionsEmbellishment(leftText) or TooltipLineMentionsEmbellishment(rightText) then
             return true
         end
-    end
-
-    return false
+    end) or false
 end
 
-function Items.IsEmbellished(itemLink, itemID)
-    if not itemLink and itemID then
-        itemLink = select(2, C_Item.GetItemInfo(itemID))
-    end
+local embellishCache = {}
 
+function Items.IsEmbellished(itemLink, itemID)
+    itemLink = Items.ResolveItemLink(itemID, itemLink)
     if not itemLink then
         return false
     end
@@ -255,6 +290,10 @@ function Items.ParseItemLinkModifiers(itemLink)
         return nil
     end
 
+    if linkModsCache[itemLink] then
+        return linkModsCache[itemLink]
+    end
+
     local itemString = string.match(itemLink, "item[%-?%d:]+")
     if not itemString then
         return nil
@@ -278,11 +317,13 @@ function Items.ParseItemLinkModifiers(itemLink)
         gems[i] = num(3 + i)
     end
 
-    return {
+    local mods = {
         itemID = itemID,
         enchantID = enchantID,
         gems = gems,
     }
+    linkModsCache[itemLink] = mods
+    return mods
 end
 
 function Items.GetItemLevel(itemLink, itemLocation)
@@ -350,35 +391,41 @@ function Items.ToGearEntry(location)
     return location.itemID
 end
 
-function Items.ToGearEntryFromLink(itemID, itemLink, bag, slot)
-    return Items.ToGearEntry({
-        itemID = itemID,
-        itemLink = itemLink,
-        bag = bag,
-        slot = slot,
-    })
-end
-
 function Items.ToComparisonProfile(location)
     return LoadoutLocker.Upgrades.BuildComparisonProfile(location)
 end
 
-function Items.CollectPlayerProfiles()
+function Items.CollectPlayerProfiles(gearSet)
+    local savedItemIDs
+
+    if gearSet then
+        savedItemIDs = {}
+        for _, entry in pairs(gearSet) do
+            local itemID = type(entry) == "table" and entry.itemID or entry
+            if itemID then
+                savedItemIDs[itemID] = true
+            end
+        end
+    end
+
     local profiles = {}
 
     Items.ForEachPlayerItem(function(location)
+        if savedItemIDs then
+            local matches = false
+            for savedItemID in pairs(savedItemIDs) do
+                if Items.MatchesFamily(savedItemID, location.itemID) then
+                    matches = true
+                    break
+                end
+            end
+            if not matches then
+                return
+            end
+        end
+
         profiles[#profiles + 1] = Items.ToComparisonProfile(location)
     end)
 
     return profiles
-end
-
-function Items.CollectPlayerLocations()
-    local locations = {}
-
-    Items.ForEachPlayerItem(function(location)
-        locations[#locations + 1] = location
-    end)
-
-    return locations
 end

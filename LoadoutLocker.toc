@@ -2,11 +2,11 @@
 ## Title: LoadoutLocker
 ## Notes: Saves and restores gear sets per talent loadout.
 ## Author: Sandrokos
-## Version: 1.5.0
+## Version: 1.6.0
 ## SavedVariablesPerCharacter: LoadoutLockerDB
 
-db.lua
 Constants.lua
+db.lua
 Items.lua
 Loadout.lua
 Gear.lua
