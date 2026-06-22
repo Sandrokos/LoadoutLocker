@@ -3,111 +3,31 @@ LoadoutLocker = LoadoutLocker or {}
 local Upgrades = {}
 LoadoutLocker.Upgrades = Upgrades
 
-local TERTIARY_PRIORITY = { "sockets", "avoidance", "leech", "speed" }
-
-local TERTIARY_LABELS = {
-    sockets = "socket",
-    avoidance = "Avoidance",
-    leech = "Leech",
-    speed = "Speed",
-}
-
-local TERTIARY_STAT_KEYS = {
-    avoidance = {
-        "ITEM_MOD_CR_AVOIDANCE_SHORT",
-        "ITEM_MOD_CR_AVOIDANCE",
-    },
-    leech = {
-        "ITEM_MOD_CR_LEECH_SHORT",
-        "ITEM_MOD_CR_LIFESTEAL",
-        "ITEM_MOD_CR_LEECH",
-    },
-    speed = {
-        "ITEM_MOD_CR_SPEED_SHORT",
-        "ITEM_MOD_CR_SPEED",
-    },
-}
-
-local TERTIARY_TOOLTIP_MARKERS = {
-    avoidance = "Avoidance",
-    leech = "Leech",
-    speed = "Speed",
-}
-
-local TRACK_RANK = {
-    { "ascendant voidforged", 10, "Ascendant Voidforged" },
-    { "sporefused", 10, "Sporefused" },
-    { "sporeinfused", 10, "Sporeinfused" },
-    { "mythic", 5 },
-    { "myth", 5 },
-    { "heroic", 4 },
-    { "hero", 4 },
-    { "champion", 3 },
-    { "veteran", 2 },
-    { "adventurer", 1 },
-}
-
-local TRACK_SCAN_MARKERS = {
-    { "ascendant voidforged", "Ascendant Voidforged" },
-    { "sporefused", "Sporefused" },
-    { "sporeinfused", "Sporeinfused" },
-}
+local C = LoadoutLocker.Constants
+local Items = LoadoutLocker.Items
+local Gear = LoadoutLocker.Gear
 
 local scanTooltip
-
-local BAGS = {
-    Enum.BagIndex.Backpack,
-    Enum.BagIndex.Bag_1,
-    Enum.BagIndex.Bag_2,
-    Enum.BagIndex.Bag_3,
-    Enum.BagIndex.Bag_4,
-}
-
-local SEARCH_SLOTS = {
-    INVSLOT_HEAD,
-    INVSLOT_NECK,
-    INVSLOT_SHOULDER,
-    INVSLOT_BODY,
-    INVSLOT_CHEST,
-    INVSLOT_WAIST,
-    INVSLOT_LEGS,
-    INVSLOT_FEET,
-    INVSLOT_WRIST,
-    INVSLOT_HAND,
-    INVSLOT_FINGER1,
-    INVSLOT_FINGER2,
-    INVSLOT_TRINKET1,
-    INVSLOT_TRINKET2,
-    INVSLOT_BACK,
-    INVSLOT_MAINHAND,
-    INVSLOT_OFFHAND,
-}
 
 local offerState = {
     callback = nil,
     gearSet = nil,
     changed = false,
-    saveTarget = nil,
     declinedSlots = nil,
     offerQueue = nil,
     offerIndex = 1,
 }
 local currentOffer
-local upgradeFrame
 local ShowNextOffer
 local AcceptCurrentOffer
 local RespondToOffer
-
-local function NormalizeInvSlot(invSlot)
-    return tonumber(invSlot) or invSlot
-end
 
 local function IterGearSetSlots(gearSet)
     local slots = {}
     local seen = {}
 
     for invSlot in pairs(gearSet) do
-        local normalized = NormalizeInvSlot(invSlot)
+        local normalized = Gear.NormalizeInvSlot(invSlot)
         if type(normalized) == "number" and not seen[normalized] then
             seen[normalized] = true
             slots[#slots + 1] = normalized
@@ -118,18 +38,8 @@ local function IterGearSetSlots(gearSet)
     return slots
 end
 
-local function GetGearEntry(gearSet, invSlot)
-    return gearSet[invSlot] or gearSet[tostring(invSlot)]
-end
-
 local function GetInstanceLocationKey(profile)
-    if profile and profile.bag and profile.slot then
-        return "bag:" .. profile.bag .. ":" .. profile.slot
-    end
-
-    if profile and profile.invSlot then
-        return "equipped:" .. profile.invSlot
-    end
+    return Items.GetLocationKey(profile)
 end
 
 local function IsReservedInstance(profile, reservedInstances)
@@ -143,10 +53,10 @@ AcceptCurrentOffer = function()
     end
 
     local candidate = currentOffer.candidate
-    LoadoutLocker.Gear.SetGearSetEntry(
+    Gear.SetGearSetEntry(
         offerState.gearSet,
         currentOffer.invSlot,
-        LoadoutLocker.Gear.CreateGearEntryFromLink(
+        Items.ToGearEntryFromLink(
             candidate.itemID,
             candidate.itemLink,
             candidate.bag,
@@ -165,61 +75,40 @@ RespondToOffer = function(accepted)
     if accepted then
         AcceptCurrentOffer()
     else
-        offerState.declinedSlots[NormalizeInvSlot(currentOffer.invSlot)] = true
+        offerState.declinedSlots[Gear.NormalizeInvSlot(currentOffer.invSlot)] = true
     end
 
     currentOffer = nil
 
-    if upgradeFrame then
-        upgradeFrame:Hide()
-    end
+    LoadoutLocker.UI.HideUpgradeOffer()
 
     offerState.offerIndex = offerState.offerIndex + 1
-    C_Timer.After(0.05, ShowNextOffer)
+    C_Timer.After(C.OFFER_ADVANCE_DELAY, ShowNextOffer)
 end
 
 local function GetItemName(itemID)
-    return C_Item.GetItemNameByID and C_Item.GetItemNameByID(itemID) or GetItemInfo(itemID)
+    return Items.GetDisplayName(itemID)
 end
 
 local function ItemsShareName(itemIDA, itemIDB)
-    if not itemIDA or not itemIDB then
-        return false
-    end
-
-    if itemIDA == itemIDB then
-        return true
-    end
-
-    local nameA = GetItemName(itemIDA)
-    local nameB = GetItemName(itemIDB)
-    return nameA and nameB and nameA == nameB
+    return Items.MatchesFamily(itemIDA, itemIDB)
 end
 
-local function MatchTrackEntry(trackString)
+local function MatchTrackEntry(trackString, tierOnly)
     if not trackString or trackString == "" then
         return nil
     end
 
     local lower = string.lower(trackString)
-    for _, entry in ipairs(TRACK_RANK) do
-        if string.find(lower, entry[1], 1, true) then
+    for _, entry in ipairs(C.TRACK_RANK) do
+        if (not tierOnly or entry[2] < 10) and string.find(lower, entry[1], 1, true) then
             return entry
         end
     end
 end
 
 local function GetExplicitTierEntry(trackString)
-    if not trackString or trackString == "" then
-        return nil
-    end
-
-    local lower = string.lower(trackString)
-    for _, entry in ipairs(TRACK_RANK) do
-        if entry[2] < 10 and string.find(lower, entry[1], 1, true) then
-            return entry
-        end
-    end
+    return MatchTrackEntry(trackString, true)
 end
 
 local function GetExplicitTierRank(trackString)
@@ -294,36 +183,22 @@ local function TracksAreSameFamily(trackA, trackB)
         and GetTrackLabel(trackA) == GetTrackLabel(trackB)
 end
 
-local function GetItemIcon(itemID, itemLink)
-    if itemLink and C_Item.GetItemIconByID then
-        return C_Item.GetItemIconByID(itemID)
-    end
-    return select(5, C_Item.GetItemInfo(itemID))
+function Upgrades.GetItemDisplayName(itemID)
+    return GetItemName(itemID)
 end
 
-local function FormatSocketLine(socketCount)
-    if socketCount <= 0 then
-        return nil
-    end
-    if socketCount == 1 then
-        return "1 socket"
-    end
-    return socketCount .. " sockets"
-end
-
-local function FormatProfileDetails(profile)
+function Upgrades.FormatProfileDetails(profile)
     local parts = {
         string.format("%s | ilvl %d", GetTrackLabel(profile.trackString), profile.itemLevel),
     }
 
-    local socketLine = FormatSocketLine(profile.sockets)
-    if socketLine then
-        parts[#parts + 1] = socketLine
+    if profile.sockets > 0 then
+        parts[#parts + 1] = profile.sockets == 1 and "1 socket" or (profile.sockets .. " sockets")
     end
 
-    for _, field in ipairs(TERTIARY_PRIORITY) do
+    for _, field in ipairs(C.TERTIARY_PRIORITY) do
         if field ~= "sockets" and profile[field] > 0 then
-            parts[#parts + 1] = TERTIARY_LABELS[field]
+            parts[#parts + 1] = C.TERTIARY_LABELS[field]
         end
     end
 
@@ -334,220 +209,19 @@ local function FormatProfileDetails(profile)
     return table.concat(parts, ", ")
 end
 
-local function AttachItemTooltip(widget, itemLink)
-    if not itemLink then
-        widget:SetScript("OnEnter", nil)
-        widget:SetScript("OnLeave", nil)
-        return
+function Upgrades.GetItemIcon(itemID, itemLink)
+    if itemLink and C_Item.GetItemIconByID then
+        return C_Item.GetItemIconByID(itemID)
     end
-
-    widget:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetHyperlink(itemLink)
-        GameTooltip:Show()
-    end)
-    widget:SetScript("OnLeave", function()
-        GameTooltip:Hide()
-    end)
-end
-
-local function CreateItemPanel(parent, name, xOffset)
-    local panel = CreateFrame("Frame", parent:GetName() .. name, parent)
-    panel:SetSize(185, 1)
-
-    panel.header = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    panel.header:SetPoint("TOP", panel, "TOP", 0, 0)
-
-    panel.icon = CreateFrame("Button", nil, panel)
-    panel.icon:SetSize(40, 40)
-    panel.icon:SetPoint("TOP", panel.header, "BOTTOM", 0, -8)
-    panel.icon:SetNormalTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-
-    panel.name = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    panel.name:SetPoint("TOP", panel.icon, "BOTTOM", 0, -6)
-    panel.name:SetWidth(175)
-    panel.name:SetWordWrap(true)
-    panel.name:SetJustifyH("CENTER")
-    panel.name:SetNonSpaceWrap(false)
-
-    panel.details = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    panel.details:SetPoint("TOP", panel.name, "BOTTOM", 0, -6)
-    panel.details:SetWidth(175)
-    panel.details:SetWordWrap(true)
-    panel.details:SetJustifyH("CENTER")
-    panel.details:SetNonSpaceWrap(false)
-
-    return panel
-end
-
-local function MeasureItemPanel(panel)
-    local headerHeight = panel.header:GetStringHeight() or 12
-    local nameHeight = panel.name:GetStringHeight() or 14
-    local detailsHeight = panel.details:GetStringHeight() or 14
-    return headerHeight + 8 + 40 + 6 + nameHeight + 6 + detailsHeight
-end
-
-local function LayoutUpgradeFrame(frame)
-    local reasonHeight = frame.reason:GetStringHeight() or 14
-    local panelTop = -36 - reasonHeight - 14
-
-    frame.currentPanel:ClearAllPoints()
-    frame.currentPanel:SetPoint("TOP", frame, "TOP", -108, panelTop)
-    frame.upgradePanel:ClearAllPoints()
-    frame.upgradePanel:SetPoint("TOP", frame, "TOP", 108, panelTop)
-
-    local panelHeight = math.max(
-        MeasureItemPanel(frame.currentPanel),
-        MeasureItemPanel(frame.upgradePanel)
-    )
-
-    local arrowOffset = panelTop - (panelHeight / 2) + 12
-    frame.arrow:ClearAllPoints()
-    frame.arrow:SetPoint("TOP", frame, "TOP", 0, arrowOffset)
-
-    local frameHeight = math.abs(panelTop) + panelHeight + 58
-    frame:SetHeight(math.max(320, math.min(frameHeight, 520)))
-end
-
-local function SetItemPanel(panel, headerText, profile)
-    panel.header:SetText(headerText)
-
-    local itemName = GetItemName(profile.itemID) or "Unknown Item"
-    panel.name:SetText(itemName)
-
-    local icon = GetItemIcon(profile.itemID, profile.itemLink)
-    if icon then
-        panel.icon:GetNormalTexture():SetTexture(icon)
-    end
-
-    panel.details:SetText(FormatProfileDetails(profile))
-    AttachItemTooltip(panel.icon, profile.itemLink)
-end
-
-local function CreateUpgradeFrame()
-    if upgradeFrame then
-        return upgradeFrame
-    end
-
-    local frame = CreateFrame("Frame", "LoadoutLockerUpgradeFrame", UIParent, "BackdropTemplate")
-    frame:SetSize(480, 320)
-    frame:SetPoint("CENTER")
-    frame:SetFrameStrata("DIALOG")
-    frame:SetFrameLevel(100)
-    frame:EnableMouse(true)
-    frame:SetMovable(true)
-    frame:RegisterForDrag("LeftButton")
-    frame:SetScript("OnDragStart", frame.StartMoving)
-    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
-    frame:Hide()
-
-    frame:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true,
-        tileSize = 32,
-        edgeSize = 32,
-        insets = { left = 11, right = 12, top = 12, bottom = 11 },
-    })
-
-    frame.title = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    frame.title:SetPoint("TOP", frame, "TOP", 0, -18)
-    frame.title:SetText("LoadoutLocker Upgrade")
-
-    frame.reason = frame:CreateFontString(nil, "ARTWORK", "GameFontGreenSmall")
-    frame.reason:SetPoint("TOP", frame, "TOP", 0, -36)
-    frame.reason:SetWidth(430)
-    frame.reason:SetWordWrap(true)
-    frame.reason:SetJustifyH("CENTER")
-    frame.reason:SetSpacing(2)
-
-    frame.currentPanel = CreateItemPanel(frame, "Current", -108)
-    frame.upgradePanel = CreateItemPanel(frame, "Upgrade", 108)
-
-    frame.arrow = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlightLarge")
-    frame.arrow:SetText("=>")
-
-    frame.acceptButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    frame.acceptButton:SetSize(120, 22)
-    frame.acceptButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOM", -8, 16)
-    frame.acceptButton:SetText("Use Upgrade")
-    frame.acceptButton:SetScript("OnClick", function(self)
-        if not currentOffer then
-            return
-        end
-        self:Disable()
-        frame.declineButton:Disable()
-        RespondToOffer(true)
-    end)
-
-    frame.declineButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    frame.declineButton:SetSize(120, 22)
-    frame.declineButton:SetPoint("BOTTOMLEFT", frame, "BOTTOM", 8, 16)
-    frame.declineButton:SetText("Keep Saved")
-    frame.declineButton:SetScript("OnClick", function(self)
-        if not currentOffer then
-            return
-        end
-        self:Disable()
-        frame.acceptButton:Disable()
-        RespondToOffer(false)
-    end)
-
-    tinsert(UISpecialFrames, frame:GetName())
-    upgradeFrame = frame
-    return frame
-end
-
-local function ShowUpgradeFrame(offer)
-    local frame = CreateUpgradeFrame()
-
-    frame.acceptButton:Enable()
-    frame.declineButton:Enable()
-    frame.title:SetText(GetItemName(offer.candidate.itemID) or "Upgrade Found")
-    frame.reason:SetText(offer.reason)
-    SetItemPanel(frame.currentPanel, "Saved Item", offer.reference)
-    SetItemPanel(frame.upgradePanel, "Upgrade", offer.candidate)
-    LayoutUpgradeFrame(frame)
-
-    frame:Show()
+    return select(5, C_Item.GetItemInfo(itemID))
 end
 
 local function GetItemLevel(itemLink, itemLocation)
-    if itemLocation and C_Item.GetCurrentItemLevel then
-        local level = C_Item.GetCurrentItemLevel(itemLocation)
-        if level and level > 0 then
-            return level
-        end
-    end
-
-    if itemLink and C_Item.GetDetailedItemLevelInfo then
-        local level = C_Item.GetDetailedItemLevelInfo(itemLink)
-        if level and level > 0 then
-            return level
-        end
-    end
-
-    if itemLink then
-        return select(4, C_Item.GetItemInfo(itemLink)) or 0
-    end
-
-    return 0
+    return Items.GetItemLevel(itemLink, itemLocation)
 end
 
 local function GetSavedItemLevel(gearEntry)
-    if type(gearEntry) ~= "table" then
-        return 0
-    end
-
-    if gearEntry.itemLevel and gearEntry.itemLevel > 0 then
-        return gearEntry.itemLevel
-    end
-
-    if gearEntry.itemLink then
-        return GetItemLevel(gearEntry.itemLink)
-    end
-
-    return 0
+    return Items.GetSavedItemLevel(gearEntry)
 end
 
 local function GetItemInfoCandidates(itemLink, itemID)
@@ -579,15 +253,18 @@ local function EnsureScanTooltip()
     return scanTooltip
 end
 
-local function MatchSpecialTrackFromText(text)
-    if not text then
-        return nil
-    end
-
-    local lower = string.lower(text)
-    for _, marker in ipairs(TRACK_SCAN_MARKERS) do
-        if string.find(lower, marker[1], 1, true) then
-            return marker[2]
+local function ForEachTooltipLine(callback)
+    local tooltip = EnsureScanTooltip()
+    for i = 1, tooltip:NumLines() do
+        for _, lineKey in ipairs({ "TextLeft", "TextRight" }) do
+            local line = _G["LoadoutLockerUpgradeScanTooltip" .. lineKey .. i]
+            local text = line and line:GetText()
+            if text then
+                local result = callback(text)
+                if result ~= nil then
+                    return result
+                end
+            end
         end
     end
 end
@@ -598,7 +275,7 @@ local function MatchStandardTrackFromText(text)
     end
 
     local lower = string.lower(text)
-    for _, entry in ipairs(TRACK_RANK) do
+    for _, entry in ipairs(C.TRACK_RANK) do
         if entry[2] < 10 and string.find(lower, entry[1], 1, true) then
             return entry[3] or entry[1]
         end
@@ -614,52 +291,20 @@ local function ScanTooltipForUpgradeTrack(itemLink)
     tooltip:ClearLines()
     tooltip:SetHyperlink(itemLink)
 
-    for i = 1, tooltip:NumLines() do
-        for _, lineKey in ipairs({ "TextLeft", "TextRight" }) do
-            local line = _G["LoadoutLockerUpgradeScanTooltip" .. lineKey .. i]
-            if line then
-                local text = line:GetText()
-                if text then
-                    for _, marker in ipairs(TRACK_SCAN_MARKERS) do
-                        local familyLabel = marker[2]
-                        local tier = string.match(text, familyLabel .. "%s*:%s*(%S+)")
-                        if tier then
-                            return familyLabel .. ": " .. tier
-                        end
-                    end
-
-                    local standardTrack = MatchStandardTrackFromText(text)
-                    if standardTrack then
-                        return standardTrack
-                    end
-                end
+    return ForEachTooltipLine(function(text)
+        for _, marker in ipairs(C.TRACK_SCAN_MARKERS) do
+            local familyLabel = marker[2]
+            local tier = string.match(text, familyLabel .. "%s*:%s*(%S+)")
+            if tier then
+                return familyLabel .. ": " .. tier
+            end
+            if string.find(string.lower(text), marker[1], 1, true) then
+                return familyLabel
             end
         end
-    end
 
-    for i = 1, tooltip:NumLines() do
-        for _, lineKey in ipairs({ "TextLeft", "TextRight" }) do
-            local line = _G["LoadoutLockerUpgradeScanTooltip" .. lineKey .. i]
-            if line then
-                local track = MatchSpecialTrackFromText(line:GetText())
-                if track then
-                    return track
-                end
-            end
-        end
-    end
-end
-
-local function GetUpgradeTrackFromInfo(info)
-    if not info then
-        return nil
-    end
-
-    if info.trackString and info.trackString ~= "" then
-        return info.trackString
-    end
-
-    return nil
+        return MatchStandardTrackFromText(text)
+    end)
 end
 
 local function GetUpgradeTrack(itemLink, itemID, itemLocation)
@@ -675,11 +320,17 @@ local function GetUpgradeTrack(itemLink, itemID, itemLocation)
         end
     end
 
+    local function trackFromUpgradeInfo(info)
+        if info and info.trackString and info.trackString ~= "" then
+            return info.trackString
+        end
+    end
+
     if itemLocation and C_Item.GetItemUpgradeInfo then
         local ok, info = pcall(C_Item.GetItemUpgradeInfo, itemLocation)
         if ok and info then
             upgradeInfo = info
-            local track = GetUpgradeTrackFromInfo(info)
+            local track = trackFromUpgradeInfo(info)
             if track then
                 return track
             end
@@ -691,7 +342,7 @@ local function GetUpgradeTrack(itemLink, itemID, itemLocation)
             local ok, info = pcall(C_Item.GetItemUpgradeInfo, itemInfo)
             if ok and info then
                 upgradeInfo = info
-                local track = GetUpgradeTrackFromInfo(info)
+                local track = trackFromUpgradeInfo(info)
                 if track then
                     return track
                 end
@@ -703,7 +354,7 @@ local function GetUpgradeTrack(itemLink, itemID, itemLocation)
             local ok, info = pcall(C_Item.GetItemUpgradeInfo, itemID)
             if ok and info then
                 upgradeInfo = info
-                local track = GetUpgradeTrackFromInfo(info)
+                local track = trackFromUpgradeInfo(info)
                 if track then
                     return track
                 end
@@ -807,21 +458,13 @@ local function ScanTooltipForTertiaries(itemLink)
     tooltip:ClearLines()
     tooltip:SetHyperlink(itemLink)
 
-    for i = 1, tooltip:NumLines() do
-        for _, lineKey in ipairs({ "TextLeft", "TextRight" }) do
-            local line = _G["LoadoutLockerUpgradeScanTooltip" .. lineKey .. i]
-            if line then
-                local text = line:GetText()
-                if text then
-                    for field, marker in pairs(TERTIARY_TOOLTIP_MARKERS) do
-                        if string.find(text, marker, 1, true) then
-                            stats[field] = 1
-                        end
-                    end
-                end
+    ForEachTooltipLine(function(text)
+        for field, marker in pairs(C.TERTIARY_LABELS) do
+            if field ~= "sockets" and string.find(text, marker, 1, true) then
+                stats[field] = 1
             end
         end
-    end
+    end)
 
     return stats
 end
@@ -850,7 +493,7 @@ local function GetTertiaryStats(itemLink, itemID, itemLocation)
 
     local itemStats = GetItemStatsTable(itemLink, itemID)
     if itemStats then
-        for field, keys in pairs(TERTIARY_STAT_KEYS) do
+        for field, keys in pairs(C.TERTIARY_STAT_KEYS) do
             stats[field] = GetStatValue(itemStats, keys)
         end
     end
@@ -867,7 +510,25 @@ local function GetTertiaryStats(itemLink, itemID, itemLocation)
     return stats
 end
 
-local function BuildItemProfile(itemID, itemLink, bag, slot, invSlot)
+local function BuildItemProfile(itemIDOrLocation, itemLink, bag, slot, invSlot)
+    local location
+    if type(itemIDOrLocation) == "table" then
+        location = itemIDOrLocation
+    else
+        location = {
+            itemID = itemIDOrLocation,
+            itemLink = itemLink,
+            bag = bag,
+            slot = slot,
+            invSlot = invSlot,
+        }
+    end
+
+    local itemID = location.itemID
+    local itemLink = location.itemLink
+    local bag = location.bag
+    local slot = location.slot
+    local invSlot = location.invSlot
     local itemLocation
     if bag and slot and ItemLocation and ItemLocation.CreateFromBagAndSlot then
         itemLocation = ItemLocation:CreateFromBagAndSlot(bag, slot)
@@ -907,33 +568,16 @@ local function BuildItemProfile(itemID, itemLink, bag, slot, invSlot)
     }
 end
 
-local function FormatItemBonuses(profile)
-    local parts = {}
-
-    if profile.sockets > 0 then
-        if profile.sockets > 1 then
-            parts[#parts + 1] = profile.sockets .. " sockets"
-        else
-            parts[#parts + 1] = "socket"
-        end
-    end
-
-    for _, field in ipairs(TERTIARY_PRIORITY) do
-        if field ~= "sockets" and profile[field] > 0 then
-            parts[#parts + 1] = TERTIARY_LABELS[field]
-        end
-    end
-
-    if #parts == 0 then
-        return "no bonus"
-    end
-
-    return table.concat(parts, ", ")
+local function ItemMatchesSavedFamily(savedItemID, itemID)
+    return Items.MatchesFamily(savedItemID, itemID)
 end
 
--- Items can have a socket and a tertiary at the same time; compare the full profile.
+local function CollectPlayerItemProfiles()
+    return Items.CollectPlayerProfiles()
+end
+
 local function IsBetterBonusProfile(candidate, reference)
-    for _, field in ipairs(TERTIARY_PRIORITY) do
+    for _, field in ipairs(C.TERTIARY_PRIORITY) do
         local candidateValue = candidate[field]
         local referenceValue = reference[field]
         if candidateValue ~= referenceValue then
@@ -942,10 +586,6 @@ local function IsBetterBonusProfile(candidate, reference)
     end
 
     return false
-end
-
-local function IsBetterTertiary(candidate, reference)
-    return IsBetterBonusProfile(candidate, reference)
 end
 
 local function IsSameItemInstance(candidate, reference)
@@ -994,7 +634,7 @@ local function IsBetterItem(candidate, reference)
         return candidateNamedRank > referenceNamedRank
     end
 
-    return IsBetterTertiary(candidate, reference)
+    return IsBetterBonusProfile(candidate, reference)
 end
 
 local function GetSavedItemID(gearEntry)
@@ -1026,7 +666,7 @@ local function ProfileMatchesSavedEntry(itemLink, gearEntry)
     return false
 end
 
-local function FindReferenceProfile(savedItemID, invSlot, savedItemLink, gearEntry)
+local function FindReferenceProfile(savedItemID, invSlot, savedItemLink, gearEntry, playerProfiles)
     local savedLink = savedItemLink or GetSavedItemLink(gearEntry)
 
     if savedLink then
@@ -1035,40 +675,57 @@ local function FindReferenceProfile(savedItemID, invSlot, savedItemLink, gearEnt
 
     local profile
 
-    if invSlot then
-        local equippedID = GetInventoryItemID("player", invSlot)
-        local equippedLink = GetInventoryItemLink("player", invSlot)
-        if equippedID and equippedLink and ProfileMatchesSavedEntry(equippedLink, gearEntry)
-            and (equippedID == savedItemID or ItemsShareName(savedItemID, equippedID)) then
-            profile = BuildItemProfile(equippedID, equippedLink, nil, nil, invSlot)
-        end
-    end
-
-    if not profile then
-        local savedLevel = GetSavedItemLevel(gearEntry)
-        for _, bag in ipairs(BAGS) do
-            local numSlots = C_Container.GetContainerNumSlots(bag)
-            for slot = 1, numSlots do
-                local bagItemID = C_Container.GetContainerItemID(bag, slot)
-                if bagItemID == savedItemID or ItemsShareName(savedItemID, bagItemID) then
-                    local itemLink = C_Container.GetContainerItemLink(bag, slot)
-                    if ProfileMatchesSavedEntry(itemLink, gearEntry) then
-                        profile = BuildItemProfile(bagItemID, itemLink, bag, slot)
-                        break
-                    end
-                    if not savedLink and savedLevel > 0 then
-                        local bagProfile = BuildItemProfile(bagItemID, itemLink, bag, slot)
-                        if bagProfile.itemLevel == 0 or bagProfile.itemLevel == savedLevel then
-                            profile = bagProfile
-                            break
-                        end
-                    end
-                end
-            end
-            if profile then
+    if invSlot and playerProfiles then
+        for _, itemProfile in ipairs(playerProfiles) do
+            if itemProfile.invSlot == invSlot
+                and ProfileMatchesSavedEntry(itemProfile.itemLink, gearEntry)
+                and ItemMatchesSavedFamily(savedItemID, itemProfile.itemID) then
+                profile = itemProfile
                 break
             end
         end
+    elseif invSlot then
+        local equipped = Items.FromEquippedSlot(invSlot)
+        if equipped and ProfileMatchesSavedEntry(equipped.itemLink, gearEntry)
+            and ItemMatchesSavedFamily(savedItemID, equipped.itemID) then
+            profile = BuildItemProfile(equipped)
+        end
+    end
+
+    if not profile and playerProfiles then
+        local savedLevel = GetSavedItemLevel(gearEntry)
+        for _, itemProfile in ipairs(playerProfiles) do
+            if ItemMatchesSavedFamily(savedItemID, itemProfile.itemID) then
+                if ProfileMatchesSavedEntry(itemProfile.itemLink, gearEntry) then
+                    profile = itemProfile
+                    break
+                end
+                if savedLevel > 0
+                    and (itemProfile.itemLevel == 0 or itemProfile.itemLevel == savedLevel) then
+                    profile = itemProfile
+                    break
+                end
+            end
+        end
+    elseif not profile then
+        local savedLevel = GetSavedItemLevel(gearEntry)
+
+        Items.ForEachBagItem(function(location)
+            if profile then
+                return
+            end
+
+            if ItemMatchesSavedFamily(savedItemID, location.itemID) then
+                if ProfileMatchesSavedEntry(location.itemLink, gearEntry) then
+                    profile = BuildItemProfile(location)
+                elseif savedLevel > 0 then
+                    local bagProfile = BuildItemProfile(location)
+                    if bagProfile.itemLevel == 0 or bagProfile.itemLevel == savedLevel then
+                        profile = bagProfile
+                    end
+                end
+            end
+        end)
     end
 
     if not profile then
@@ -1096,32 +753,18 @@ local function ConsiderUpgradeCandidate(profile, referenceProfile, reservedInsta
     return bestCandidate
 end
 
-local function ItemMatchesSavedFamily(savedItemID, itemID)
-    if not itemID or not savedItemID then
-        return false
-    end
-
-    if itemID == savedItemID then
-        return true
-    end
-
-    return ItemsShareName(savedItemID, itemID)
-end
-
-local function FindBestUpgrade(savedItemID, referenceProfile, reservedInstances, targetInvSlot)
-    if not GetItemName(savedItemID) then
+local function FindBestUpgrade(savedItemID, referenceProfile, reservedInstances, targetInvSlot, playerProfiles)
+    if not GetItemName(savedItemID) or not playerProfiles then
         return nil
     end
 
     reservedInstances = reservedInstances or {}
     local bestCandidate
 
-    if targetInvSlot then
-        local itemID = GetInventoryItemID("player", targetInvSlot)
-        if ItemMatchesSavedFamily(savedItemID, itemID) then
-            local itemLink = GetInventoryItemLink("player", targetInvSlot)
+    local function consider(profile)
+        if ItemMatchesSavedFamily(savedItemID, profile.itemID) then
             bestCandidate = ConsiderUpgradeCandidate(
-                BuildItemProfile(itemID, itemLink, nil, nil, targetInvSlot),
+                profile,
                 referenceProfile,
                 reservedInstances,
                 bestCandidate
@@ -1129,34 +772,17 @@ local function FindBestUpgrade(savedItemID, referenceProfile, reservedInstances,
         end
     end
 
-    for _, bag in ipairs(BAGS) do
-        local numSlots = C_Container.GetContainerNumSlots(bag)
-        for slot = 1, numSlots do
-            local itemID = C_Container.GetContainerItemID(bag, slot)
-            if ItemMatchesSavedFamily(savedItemID, itemID) then
-                local itemLink = C_Container.GetContainerItemLink(bag, slot)
-                bestCandidate = ConsiderUpgradeCandidate(
-                    BuildItemProfile(itemID, itemLink, bag, slot),
-                    referenceProfile,
-                    reservedInstances,
-                    bestCandidate
-                )
+    if targetInvSlot then
+        for _, profile in ipairs(playerProfiles) do
+            if profile.invSlot == targetInvSlot then
+                consider(profile)
             end
         end
     end
 
-    for _, invSlot in ipairs(SEARCH_SLOTS) do
-        if invSlot ~= targetInvSlot then
-            local itemID = GetInventoryItemID("player", invSlot)
-            if ItemMatchesSavedFamily(savedItemID, itemID) then
-                local itemLink = GetInventoryItemLink("player", invSlot)
-                bestCandidate = ConsiderUpgradeCandidate(
-                    BuildItemProfile(itemID, itemLink, nil, nil, invSlot),
-                    referenceProfile,
-                    reservedInstances,
-                    bestCandidate
-                )
-            end
+    for _, profile in ipairs(playerProfiles) do
+        if profile.invSlot ~= targetInvSlot then
+            consider(profile)
         end
     end
 
@@ -1173,7 +799,7 @@ function Upgrades.IsLinkBetterThanSavedEntry(itemLink, gearEntry)
         return false
     end
 
-    local linkMods = LoadoutLocker.Gear.ParseItemLinkModifiers(itemLink)
+    local linkMods = Items.ParseItemLinkModifiers(itemLink)
     if not linkMods or not ItemsShareName(savedID, linkMods.itemID) then
         return false
     end
@@ -1185,32 +811,6 @@ function Upgrades.IsLinkBetterThanSavedEntry(itemLink, gearEntry)
     local referenceProfile = FindReferenceProfile(savedID, nil, GetSavedItemLink(gearEntry), gearEntry)
     local candidateProfile = BuildItemProfile(linkMods.itemID, itemLink)
     return IsBetterItem(candidateProfile, referenceProfile)
-end
-
-function Upgrades.MergeBetterEquippedIntoGearSet(gearSet)
-    if not gearSet then
-        return false
-    end
-
-    local changed = false
-
-    for _, invSlot in ipairs(SEARCH_SLOTS) do
-        local gearEntry = GetGearEntry(gearSet, invSlot)
-        if gearEntry then
-            local equippedLink = GetInventoryItemLink("player", invSlot)
-            if equippedLink and Upgrades.IsLinkBetterThanSavedEntry(equippedLink, gearEntry) then
-                local itemID = GetInventoryItemID("player", invSlot)
-                LoadoutLocker.Gear.SetGearSetEntry(
-                    gearSet,
-                    invSlot,
-                    LoadoutLocker.Gear.CreateGearEntryFromLink(itemID, equippedLink)
-                )
-                changed = true
-            end
-        end
-    end
-
-    return changed
 end
 
 local function DescribeUpgradeReason(candidate, reference)
@@ -1239,14 +839,14 @@ local function DescribeUpgradeReason(candidate, reference)
 
     if candidateComparable == referenceComparable
         and candidate.itemLevel == reference.itemLevel then
-        for _, field in ipairs(TERTIARY_PRIORITY) do
+        for _, field in ipairs(C.TERTIARY_PRIORITY) do
             if candidate[field] > reference[field] then
                 if field == "sockets" then
                     reasons[#reasons + 1] = candidate.sockets > 1 and "extra sockets" or "extra socket"
                 elseif reference[field] > 0 then
-                    reasons[#reasons + 1] = "more " .. TERTIARY_LABELS[field]
+                    reasons[#reasons + 1] = "more " .. C.TERTIARY_LABELS[field]
                 else
-                    reasons[#reasons + 1] = TERTIARY_LABELS[field]
+                    reasons[#reasons + 1] = C.TERTIARY_LABELS[field]
                 end
             end
         end
@@ -1259,24 +859,39 @@ local function DescribeUpgradeReason(candidate, reference)
     return table.concat(reasons, ", ")
 end
 
-function Upgrades.FindOffers(gearSet)
+function Upgrades.BuildComparisonProfile(location)
+    return BuildItemProfile(location)
+end
+
+function Upgrades.FindOffers(gearSet, options)
+    options = options or {}
+    local slotFilter = options.slots
+
     local offers = {}
     local reservedInstances = {}
     local offeredSlots = {}
+    local playerProfiles = CollectPlayerItemProfiles()
 
     for _, invSlot in ipairs(IterGearSetSlots(gearSet)) do
-        local normalizedSlot = NormalizeInvSlot(invSlot)
-        if not offeredSlots[normalizedSlot] then
-            local gearEntry = GetGearEntry(gearSet, invSlot)
+        local normalizedSlot = Gear.NormalizeInvSlot(invSlot)
+        if (not slotFilter or slotFilter[normalizedSlot]) and not offeredSlots[normalizedSlot] then
+            local gearEntry = Gear.GetGearSetEntry(gearSet, invSlot)
             local savedItemID = GetSavedItemID(gearEntry)
             if savedItemID then
                 local referenceProfile = FindReferenceProfile(
                     savedItemID,
                     normalizedSlot,
                     GetSavedItemLink(gearEntry),
-                    gearEntry
+                    gearEntry,
+                    playerProfiles
                 )
-                local candidate = FindBestUpgrade(savedItemID, referenceProfile, reservedInstances, normalizedSlot)
+                local candidate = FindBestUpgrade(
+                    savedItemID,
+                    referenceProfile,
+                    reservedInstances,
+                    normalizedSlot,
+                    playerProfiles
+                )
                 if candidate then
                     offers[#offers + 1] = {
                         invSlot = normalizedSlot,
@@ -1310,12 +925,11 @@ local function FinishOfferQueue()
     local declinedSlots = offerState.declinedSlots
 
     if gearSet then
-        LoadoutLocker.Gear.NormalizeGearSetKeys(gearSet)
+        Gear.NormalizeGearSetKeys(gearSet)
     end
 
     offerState.gearSet = nil
     offerState.callback = nil
-    offerState.saveTarget = nil
     offerState.changed = false
     offerState.declinedSlots = nil
     offerState.offerQueue = nil
@@ -1334,9 +948,9 @@ ShowNextOffer = function()
 
     while offerState.offerIndex <= #offerState.offerQueue do
         local nextOffer = offerState.offerQueue[offerState.offerIndex]
-        if not offerState.declinedSlots[NormalizeInvSlot(nextOffer.invSlot)] then
+        if not offerState.declinedSlots[Gear.NormalizeInvSlot(nextOffer.invSlot)] then
             currentOffer = nextOffer
-            ShowUpgradeFrame(nextOffer)
+            LoadoutLocker.UI.ShowUpgradeOffer(nextOffer, RespondToOffer)
             return
         end
         offerState.offerIndex = offerState.offerIndex + 1
@@ -1363,9 +977,11 @@ function Upgrades.PromptForBetterItems(gearSet, options)
         return
     end
 
-    LoadoutLocker.Gear.NormalizeGearSetKeys(gearSet)
+    Gear.NormalizeGearSetKeys(gearSet)
 
-    local offers = Upgrades.FindOffers(gearSet)
+    local offers = options and options.offers or Upgrades.FindOffers(gearSet, {
+        slots = options and options.slotFilter,
+    })
     if #offers == 0 then
         if onComplete then
             onComplete(gearSet, false, nil)
@@ -1381,17 +997,7 @@ function Upgrades.PromptForBetterItems(gearSet, options)
     offerState.offerIndex = 1
     currentOffer = nil
 
-    if upgradeFrame and upgradeFrame:IsShown() then
-        upgradeFrame:Hide()
-    end
+    LoadoutLocker.UI.HideUpgradeOffer()
 
-    if options and options.specID and options.configID then
-        offerState.saveTarget = {
-            specID = options.specID,
-            configID = options.configID,
-        }
-    else
-        offerState.saveTarget = nil
-    end
     ShowNextOffer()
 end

@@ -1,18 +1,214 @@
-local TALENT_UI_ADDON = LoadoutLocker.TALENT_UI_ADDON
+LoadoutLocker = LoadoutLocker or {}
+
+local UI = {}
+LoadoutLocker.UI = UI
+
+local C = LoadoutLocker.Constants
 local Gear = LoadoutLocker.Gear
 local DB = LoadoutLocker.DB
 local Talents = LoadoutLocker.Talents
+local Upgrades = LoadoutLocker.Upgrades
 
-local UI = CreateFrame("Frame")
-UI:RegisterEvent("ADDON_LOADED")
-UI:RegisterEvent("TRAIT_CONFIG_LIST_UPDATED")
-UI:RegisterEvent("TRAIT_CONFIG_UPDATED")
-UI:RegisterEvent("ACTIVE_PLAYER_SPECIALIZATION_CHANGED")
+local eventFrame = CreateFrame("Frame")
+eventFrame:RegisterEvent("ADDON_LOADED")
+eventFrame:RegisterEvent("TRAIT_CONFIG_LIST_UPDATED")
+eventFrame:RegisterEvent("TRAIT_CONFIG_UPDATED")
+eventFrame:RegisterEvent("ACTIVE_PLAYER_SPECIALIZATION_CHANGED")
 
 local saveButton
 local talentsFrame
-local initialized
-local refreshScheduled
+local talentUIInitialized
+local talentUIRefreshScheduled
+
+local upgradeFrame
+local upgradeOnRespond
+
+local function AttachItemTooltip(widget, itemLink)
+    if not itemLink then
+        widget:SetScript("OnEnter", nil)
+        widget:SetScript("OnLeave", nil)
+        return
+    end
+
+    widget:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetHyperlink(itemLink)
+        GameTooltip:Show()
+    end)
+    widget:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+end
+
+local function CreateItemPanel(parent, name)
+    local panel = CreateFrame("Frame", parent:GetName() .. name, parent)
+    panel:SetSize(185, 1)
+
+    panel.header = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    panel.header:SetPoint("TOP", panel, "TOP", 0, 0)
+
+    panel.icon = CreateFrame("Button", nil, panel)
+    panel.icon:SetSize(40, 40)
+    panel.icon:SetPoint("TOP", panel.header, "BOTTOM", 0, -8)
+    panel.icon:SetNormalTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+
+    panel.name = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    panel.name:SetPoint("TOP", panel.icon, "BOTTOM", 0, -6)
+    panel.name:SetWidth(175)
+    panel.name:SetWordWrap(true)
+    panel.name:SetJustifyH("CENTER")
+    panel.name:SetNonSpaceWrap(false)
+
+    panel.details = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    panel.details:SetPoint("TOP", panel.name, "BOTTOM", 0, -6)
+    panel.details:SetWidth(175)
+    panel.details:SetWordWrap(true)
+    panel.details:SetJustifyH("CENTER")
+    panel.details:SetNonSpaceWrap(false)
+
+    return panel
+end
+
+local function MeasureItemPanel(panel)
+    local headerHeight = panel.header:GetStringHeight() or 12
+    local nameHeight = panel.name:GetStringHeight() or 14
+    local detailsHeight = panel.details:GetStringHeight() or 14
+    return headerHeight + 8 + 40 + 6 + nameHeight + 6 + detailsHeight
+end
+
+local function SetItemPanel(panel, headerText, profile)
+    panel.header:SetText(headerText)
+    panel.name:SetText(Upgrades.GetItemDisplayName(profile.itemID) or "Unknown Item")
+
+    local icon = Upgrades.GetItemIcon(profile.itemID, profile.itemLink)
+    if icon then
+        panel.icon:GetNormalTexture():SetTexture(icon)
+    end
+
+    panel.details:SetText(Upgrades.FormatProfileDetails(profile))
+    AttachItemTooltip(panel.icon, profile.itemLink)
+end
+
+local function LayoutUpgradeFrame(frame)
+    local reasonHeight = frame.reason:GetStringHeight() or 14
+    local panelTop = -36 - reasonHeight - 14
+
+    frame.currentPanel:ClearAllPoints()
+    frame.currentPanel:SetPoint("TOP", frame, "TOP", -108, panelTop)
+    frame.upgradePanel:ClearAllPoints()
+    frame.upgradePanel:SetPoint("TOP", frame, "TOP", 108, panelTop)
+
+    local panelHeight = math.max(
+        MeasureItemPanel(frame.currentPanel),
+        MeasureItemPanel(frame.upgradePanel)
+    )
+
+    local arrowOffset = panelTop - (panelHeight / 2) + 12
+    frame.arrow:ClearAllPoints()
+    frame.arrow:SetPoint("TOP", frame, "TOP", 0, arrowOffset)
+
+    local frameHeight = math.abs(panelTop) + panelHeight + 58
+    frame:SetHeight(math.max(320, math.min(frameHeight, 520)))
+end
+
+local function EnsureUpgradeFrame()
+    if upgradeFrame then
+        return upgradeFrame
+    end
+
+    local frame = CreateFrame("Frame", "LoadoutLockerUpgradeFrame", UIParent, "BackdropTemplate")
+    frame:SetSize(480, 320)
+    frame:SetPoint("CENTER")
+    frame:SetFrameStrata("DIALOG")
+    frame:SetFrameLevel(100)
+    frame:EnableMouse(true)
+    frame:SetMovable(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", frame.StartMoving)
+    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+    frame:Hide()
+
+    frame:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile = true,
+        tileSize = 32,
+        edgeSize = 32,
+        insets = { left = 11, right = 12, top = 12, bottom = 11 },
+    })
+
+    frame.title = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    frame.title:SetPoint("TOP", frame, "TOP", 0, -18)
+    frame.title:SetText("LoadoutLocker Upgrade")
+
+    frame.reason = frame:CreateFontString(nil, "ARTWORK", "GameFontGreenSmall")
+    frame.reason:SetPoint("TOP", frame, "TOP", 0, -36)
+    frame.reason:SetWidth(430)
+    frame.reason:SetWordWrap(true)
+    frame.reason:SetJustifyH("CENTER")
+    frame.reason:SetSpacing(2)
+
+    frame.currentPanel = CreateItemPanel(frame, "Current")
+    frame.upgradePanel = CreateItemPanel(frame, "Upgrade")
+
+    frame.arrow = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlightLarge")
+    frame.arrow:SetText("=>")
+
+    frame.acceptButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    frame.acceptButton:SetSize(120, 22)
+    frame.acceptButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOM", -8, 16)
+    frame.acceptButton:SetText("Use Upgrade")
+    frame.acceptButton:SetScript("OnClick", function(self)
+        if not upgradeOnRespond then
+            return
+        end
+        self:Disable()
+        frame.declineButton:Disable()
+        upgradeOnRespond(true)
+    end)
+
+    frame.declineButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    frame.declineButton:SetSize(120, 22)
+    frame.declineButton:SetPoint("BOTTOMLEFT", frame, "BOTTOM", 8, 16)
+    frame.declineButton:SetText("Keep Saved")
+    frame.declineButton:SetScript("OnClick", function(self)
+        if not upgradeOnRespond then
+            return
+        end
+        self:Disable()
+        frame.acceptButton:Disable()
+        upgradeOnRespond(false)
+    end)
+
+    tinsert(UISpecialFrames, frame:GetName())
+    upgradeFrame = frame
+    return frame
+end
+
+function UI.ShowUpgradeOffer(offer, onRespond)
+    upgradeOnRespond = onRespond
+
+    local frame = EnsureUpgradeFrame()
+    frame.acceptButton:Enable()
+    frame.declineButton:Enable()
+    frame.title:SetText(Upgrades.GetItemDisplayName(offer.candidate.itemID) or "Upgrade Found")
+    frame.reason:SetText(offer.reason)
+    SetItemPanel(frame.currentPanel, "Saved Item", offer.reference)
+    SetItemPanel(frame.upgradePanel, "Upgrade", offer.candidate)
+    LayoutUpgradeFrame(frame)
+    frame:Show()
+end
+
+function UI.HideUpgradeOffer()
+    upgradeOnRespond = nil
+    if upgradeFrame then
+        upgradeFrame:Hide()
+    end
+end
+
+function UI.IsUpgradeOfferShown()
+    return upgradeFrame and upgradeFrame:IsShown()
+end
 
 local function GetTalentsFrame()
     return PlayerSpellsFrame and PlayerSpellsFrame.TalentsFrame
@@ -72,19 +268,15 @@ local function RefreshSaveButton(checkInspecting)
 end
 
 local function ScheduleSaveButtonRefresh()
-    if refreshScheduled then
+    if talentUIRefreshScheduled then
         return
     end
 
-    refreshScheduled = true
+    talentUIRefreshScheduled = true
     C_Timer.After(0, function()
-        refreshScheduled = false
+        talentUIRefreshScheduled = false
         RefreshSaveButton(false)
     end)
-end
-
-local function OnSaveButtonClick()
-    Gear.Save()
 end
 
 local function CreateSaveButton(frame)
@@ -105,14 +297,16 @@ local function CreateSaveButton(frame)
     saveButton:SetPoint("LEFT", dropdown, "LEFT", 0, 0)
     saveButton:SetPoint("RIGHT", dropdown, "RIGHT", 0, 0)
     saveButton:SetText("Save Gear")
-    saveButton:SetScript("OnClick", OnSaveButtonClick)
+    saveButton:SetScript("OnClick", function()
+        Gear.Save()
+    end)
 
     talentsFrame = frame
     RefreshSaveButton(true)
 end
 
 local function InitializeTalentUI()
-    if initialized then
+    if talentUIInitialized then
         return
     end
 
@@ -121,22 +315,22 @@ local function InitializeTalentUI()
         return
     end
 
-    initialized = true
+    talentUIInitialized = true
     frame:HookScript("OnShow", function()
         RefreshSaveButton(true)
     end)
     CreateSaveButton(frame)
 end
 
-UI:SetScript("OnEvent", function(_, event, arg1)
-    if event == "ADDON_LOADED" and arg1 == TALENT_UI_ADDON then
+eventFrame:SetScript("OnEvent", function(_, event, arg1)
+    if event == "ADDON_LOADED" and arg1 == C.TALENT_UI_ADDON then
         InitializeTalentUI()
-    elseif initialized and (event == "TRAIT_CONFIG_LIST_UPDATED" or event == "TRAIT_CONFIG_UPDATED" or event == "ACTIVE_PLAYER_SPECIALIZATION_CHANGED") then
+    elseif talentUIInitialized and (event == "TRAIT_CONFIG_LIST_UPDATED" or event == "TRAIT_CONFIG_UPDATED" or event == "ACTIVE_PLAYER_SPECIALIZATION_CHANGED") then
         ScheduleSaveButtonRefresh()
     end
 end)
 
-if C_AddOns.IsAddOnLoaded(TALENT_UI_ADDON) then
+if C_AddOns.IsAddOnLoaded(C.TALENT_UI_ADDON) then
     InitializeTalentUI()
 end
 

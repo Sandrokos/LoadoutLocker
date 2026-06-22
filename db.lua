@@ -30,6 +30,8 @@ end
 
 function DB:CopyGearSet(gear)
     local copy = {}
+    local Items = LoadoutLocker.Items
+
     for slot, entry in pairs(gear) do
         local invSlot = tonumber(slot) or slot
         if type(entry) == "table" then
@@ -40,13 +42,11 @@ function DB:CopyGearSet(gear)
             if entry.enchantID then
                 slotCopy.enchantID = entry.enchantID
             end
-            if entry.gems then
-                slotCopy.gems = {
-                    entry.gems[1] or 0,
-                    entry.gems[2] or 0,
-                    entry.gems[3] or 0,
-                    entry.gems[4] or 0,
-                }
+            if entry.gems and Items then
+                local gems = Items.CopyGemsTable(entry.gems)
+                if gems then
+                    slotCopy.gems = gems
+                end
             end
             if entry.itemLevel then
                 slotCopy.itemLevel = entry.itemLevel

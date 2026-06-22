@@ -6,7 +6,10 @@
 ## SavedVariablesPerCharacter: LoadoutLockerDB
 
 db.lua
-Upgrades.lua
+Constants.lua
+Items.lua
+Loadout.lua
 Gear.lua
+Upgrades.lua
 Main.lua
 UI.lua
