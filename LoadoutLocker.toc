@@ -11,5 +11,6 @@ Items.lua
 Loadout.lua
 Gear.lua
 Upgrades.lua
+Menu.lua
 Main.lua
 UI.lua

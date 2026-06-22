@@ -113,4 +113,30 @@ function Loadout.RecordCurrent()
     end
 end
 
+function Loadout.GetConfigList(specID)
+    specID = specID or Loadout.GetSpecID()
+    if not specID or not C_ClassTalents or not C_ClassTalents.GetConfigIDsBySpecID then
+        return {}
+    end
+
+    local configIDs = C_ClassTalents.GetConfigIDsBySpecID(specID) or {}
+    local list = {}
+
+    for _, configID in ipairs(configIDs) do
+        if not Loadout.IsStarterBuild(configID) then
+            list[#list + 1] = {
+                configID = configID,
+                name = Loadout.GetLoadoutName(configID),
+                hasSavedGear = DB:HasGearSet(specID, configID),
+            }
+        end
+    end
+
+    table.sort(list, function(a, b)
+        return a.name < b.name
+    end)
+
+    return list
+end
+
 Loadout.HookSelection()

@@ -6,6 +6,7 @@ LoadoutLocker.Upgrades = Upgrades
 local C = LoadoutLocker.Constants
 local Items = LoadoutLocker.Items
 local Gear = LoadoutLocker.Gear
+local DB = LoadoutLocker.DB
 
 local scanTooltip
 
@@ -16,11 +17,17 @@ local offerState = {
     declinedSlots = nil,
     offerQueue = nil,
     offerIndex = 1,
+    specID = nil,
+    configID = nil,
 }
 local currentOffer
 local ShowNextOffer
 local AcceptCurrentOffer
 local RespondToOffer
+
+local function GetTertiaryPriority()
+    return DB:GetTertiaryPriority()
+end
 
 local function IterGearSetSlots(gearSet)
     local slots = {}
@@ -67,7 +74,7 @@ AcceptCurrentOffer = function()
     offerState.changed = true
 end
 
-RespondToOffer = function(accepted)
+RespondToOffer = function(accepted, doNotAskAgain)
     if not currentOffer then
         return
     end
@@ -75,7 +82,12 @@ RespondToOffer = function(accepted)
     if accepted then
         AcceptCurrentOffer()
     else
-        offerState.declinedSlots[Gear.NormalizeInvSlot(currentOffer.invSlot)] = true
+        local invSlot = Gear.NormalizeInvSlot(currentOffer.invSlot)
+        offerState.declinedSlots[invSlot] = true
+
+        if doNotAskAgain and offerState.specID and offerState.configID then
+            DB:SetIgnoredUpgradeSlot(offerState.specID, offerState.configID, invSlot)
+        end
     end
 
     currentOffer = nil
@@ -381,7 +393,7 @@ function Upgrades.FormatProfileDetails(profile)
     end
 
     local bonusParts = {}
-    for _, field in ipairs(C.TERTIARY_PRIORITY) do
+    for _, field in ipairs(GetTertiaryPriority()) do
         if field ~= "sockets" and profile[field] > 0 then
             bonusParts[#bonusParts + 1] = C.TERTIARY_LABELS[field]
         end
@@ -755,7 +767,7 @@ local function CollectPlayerItemProfiles()
 end
 
 local function IsBetterBonusProfile(candidate, reference)
-    for _, field in ipairs(C.TERTIARY_PRIORITY) do
+    for _, field in ipairs(GetTertiaryPriority()) do
         local candidateValue = candidate[field]
         local referenceValue = reference[field]
         if candidateValue ~= referenceValue then
@@ -1017,7 +1029,7 @@ local function DescribeUpgradeReason(candidate, reference)
 
     if candidateComparable == referenceComparable
         and candidate.itemLevel == reference.itemLevel then
-        for _, field in ipairs(C.TERTIARY_PRIORITY) do
+        for _, field in ipairs(GetTertiaryPriority()) do
             if candidate[field] > reference[field] then
                 if field == "sockets" then
                     reasons[#reasons + 1] = candidate.sockets > 1 and "extra sockets" or "extra socket"
@@ -1052,7 +1064,13 @@ function Upgrades.FindOffers(gearSet, options)
 
     for _, invSlot in ipairs(IterGearSetSlots(gearSet)) do
         local normalizedSlot = Gear.NormalizeInvSlot(invSlot)
-        if (not slotFilter or slotFilter[normalizedSlot]) and not offeredSlots[normalizedSlot] then
+        local ignored = options.specID
+            and options.configID
+            and DB:IsUpgradeSlotIgnored(options.specID, options.configID, normalizedSlot)
+
+        if (not slotFilter or slotFilter[normalizedSlot])
+            and not offeredSlots[normalizedSlot]
+            and not ignored then
             local gearEntry = Gear.GetGearSetEntry(gearSet, invSlot)
             local savedItemID = GetSavedItemID(gearEntry)
             if savedItemID then
@@ -1112,6 +1130,8 @@ local function FinishOfferQueue()
     offerState.declinedSlots = nil
     offerState.offerQueue = nil
     offerState.offerIndex = 1
+    offerState.specID = nil
+    offerState.configID = nil
     currentOffer = nil
 
     if callback then
@@ -1157,7 +1177,12 @@ function Upgrades.PromptForBetterItems(gearSet, options)
 
     Gear.NormalizeGearSetKeys(gearSet)
 
-    local offers = options and options.offers or Upgrades.FindOffers(gearSet)
+    local findOptions = {
+        specID = options and options.specID,
+        configID = options and options.configID,
+        slots = options and options.slots,
+    }
+    local offers = options and options.offers or Upgrades.FindOffers(gearSet, findOptions)
     if #offers == 0 then
         if onComplete then
             onComplete(gearSet, false, nil)
@@ -1171,6 +1196,8 @@ function Upgrades.PromptForBetterItems(gearSet, options)
     offerState.declinedSlots = {}
     offerState.offerQueue = offers
     offerState.offerIndex = 1
+    offerState.specID = options and options.specID
+    offerState.configID = options and options.configID
     currentOffer = nil
 
     LoadoutLocker.UI.HideUpgradeOffer()

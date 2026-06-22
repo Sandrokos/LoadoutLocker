@@ -3,22 +3,27 @@ local ADDON_NAME = ...
 local Print = LoadoutLocker.Print
 local DB = LoadoutLocker.DB
 local Gear = LoadoutLocker.Gear
+local Menu = LoadoutLocker.Menu
 
 local loginSynced
 
 local function ShowHelp()
     Print("Commands:")
+    Print("/locker - Open the LoadoutLocker menu")
     Print("/locker save - Save currently equipped gear to the active talent loadout")
     Print("/locker list - List saved gear sets for your current specialization")
     Print("/locker delete - Remove the saved gear set for the active talent loadout")
     Print("/locker scan - Check bags for better versions of saved loadout items")
+    Print("/locker settings - Set tertiary stat priority for upgrade comparisons")
     Print("/locker help - Show this help")
 end
 
 local function HandleSlashCommand(msg)
     msg = string.lower(strtrim(msg or ""))
 
-    if msg == "" or msg == "help" then
+    if msg == "" then
+        Menu.Show()
+    elseif msg == "help" then
         ShowHelp()
     elseif msg == "save" then
         Gear.Save()
@@ -28,6 +33,8 @@ local function HandleSlashCommand(msg)
         Gear.ScanForUpgrades()
     elseif msg == "delete" or msg == "clear" then
         Gear.Delete()
+    elseif msg == "settings" or msg == "priority" then
+        Menu.Show()
     else
         Print("Unknown command. Type /locker help for options.")
     end
@@ -47,6 +54,7 @@ frame:RegisterEvent("ACTIVE_PLAYER_SPECIALIZATION_CHANGED")
 frame:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" and arg1 == ADDON_NAME then
         DB:Initialize()
+        Menu.RegisterWithSettings()
     elseif (event == "PLAYER_LOGIN" or event == "TRAIT_CONFIG_LIST_UPDATED") and not loginSynced then
         if Gear.RecordCurrentLoadout() then
             loginSynced = true

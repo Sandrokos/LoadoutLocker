@@ -227,43 +227,12 @@ local function ResolveGearEntry(entry)
     return entry, nil, nil, nil, nil, nil
 end
 
-local swapDeclinedUpgradeSlots
-
-local function IsUpgradeDeclinedForSlot(invSlot, declinedUpgradeSlots)
-    local slots = declinedUpgradeSlots or swapDeclinedUpgradeSlots
-    if not slots then
-        return false
-    end
-
-    local normalizedSlot = tonumber(invSlot) or invSlot
-    return slots[normalizedSlot]
-        or slots[tostring(normalizedSlot)]
-        or false
-end
-
-local function ShouldKeepEquippedUpgrade(invSlot, itemLink, gearEntry, declinedUpgradeSlots)
-    if not itemLink or not gearEntry then
-        return false
-    end
-
-    if IsUpgradeDeclinedForSlot(invSlot, declinedUpgradeSlots) then
-        return false
-    end
-
-    return LoadoutLocker.Upgrades.IsLinkBetterThanSavedEntry(itemLink, gearEntry)
-end
-
-local function SlotSatisfiesTarget(invSlot, targetEntry, declinedUpgradeSlots)
+local function SlotSatisfiesTarget(invSlot, targetEntry)
     if not targetEntry then
         return not GetInventoryItemID("player", invSlot)
     end
 
-    local equippedLink = GetInventoryItemLink("player", invSlot)
-    if ShouldKeepEquippedUpgrade(invSlot, equippedLink, targetEntry, declinedUpgradeSlots) then
-        return true
-    end
-
-    return ItemLinkMatchesEntry(equippedLink, targetEntry)
+    return ItemLinkMatchesEntry(GetInventoryItemLink("player", invSlot), targetEntry)
 end
 
 local function MergeGearSnapshot(snapshot, expectedGearSet)
@@ -277,8 +246,6 @@ local function MergeGearSnapshot(snapshot, expectedGearSet)
         local equippedLink = GetInventoryItemLink("player", invSlot)
 
         if equippedID and entry and ItemLinkMatchesEntry(equippedLink, entry) then
-            snapshot[invSlot] = CreateGearEntry(equippedID, equippedLink)
-        elseif equippedLink and entry and ShouldKeepEquippedUpgrade(invSlot, equippedLink, entry, swapDeclinedUpgradeSlots) then
             snapshot[invSlot] = CreateGearEntry(equippedID, equippedLink)
         elseif type(entry) == "table" and entry.itemLink then
             snapshot[invSlot] = CreateGearEntry(entry.itemID, entry.itemLink)
@@ -297,8 +264,7 @@ local function ExpectedGearReady(expectedGearSet)
         local entry = Gear.GetGearSetEntry(expectedGearSet, invSlot)
         if entry then
             local equippedLink = GetInventoryItemLink("player", invSlot)
-            if not ItemLinkMatchesEntry(equippedLink, entry)
-                and not ShouldKeepEquippedUpgrade(invSlot, equippedLink, entry, swapDeclinedUpgradeSlots) then
+            if not ItemLinkMatchesEntry(equippedLink, entry) then
                 return false
             end
         end
@@ -345,10 +311,6 @@ local function ShouldUnequipSlot(invSlot, gearSet, neededItems)
 
     local gearEntry = Gear.GetGearSetEntry(gearSet, invSlot)
     local currentLink = GetInventoryItemLink("player", invSlot)
-
-    if gearEntry and ShouldKeepEquippedUpgrade(invSlot, currentLink, gearEntry, swapDeclinedUpgradeSlots) then
-        return false
-    end
 
     local targetItem, targetBag, targetSlot, targetLink = ResolveGearEntry(gearEntry)
     if targetItem then
@@ -410,7 +372,7 @@ function Gear.BuildGearDiff(targetGearSet, declinedUpgradeSlots)
 
     for _, invSlot in ipairs(C.EQUIP_SLOTS) do
         local targetEntry = Gear.GetGearSetEntry(targetGearSet, invSlot)
-        if targetEntry and not SlotSatisfiesTarget(invSlot, targetEntry, declinedUpgradeSlots) then
+        if targetEntry and not SlotSatisfiesTarget(invSlot, targetEntry) then
             diff.equip[#diff.equip + 1] = {
                 invSlot = invSlot,
                 entry = targetEntry,
@@ -659,17 +621,13 @@ local function TryEquipFromBag(invSlot, bag, slot, usedLocations)
     return true
 end
 
-local function NeedsEquipForEntry(invSlot, gearEntry, declinedUpgradeSlots)
+local function NeedsEquipForEntry(invSlot, gearEntry)
     local itemID = ResolveGearEntry(gearEntry)
     if not itemID then
         return false
     end
 
     local equippedLink = GetInventoryItemLink("player", invSlot)
-    if ShouldKeepEquippedUpgrade(invSlot, equippedLink, gearEntry, declinedUpgradeSlots) then
-        return false
-    end
-
     if ItemLinkMatchesEntry(equippedLink, gearEntry) then
         return false
     end
@@ -705,10 +663,6 @@ local function EquipSlot(invSlot, gearEntry, usedLocations)
 
     local equippedLink = GetInventoryItemLink("player", invSlot)
     if ItemLinkMatchesEntry(equippedLink, gearEntry) then
-        return true
-    end
-
-    if ShouldKeepEquippedUpgrade(invSlot, equippedLink, gearEntry, swapDeclinedUpgradeSlots) then
         return true
     end
 
@@ -770,12 +724,10 @@ local function RunGearSwap(gearSet, onComplete, declinedUpgradeSlots, verifyAtte
 
     verifyAttempt = verifyAttempt or 1
     Gear.NormalizeGearSetKeys(gearSet)
-    swapDeclinedUpgradeSlots = declinedUpgradeSlots
 
     local diff = Gear.BuildGearDiff(gearSet, declinedUpgradeSlots)
     OrderSwapDiff(diff)
     if diff.empty then
-        swapDeclinedUpgradeSlots = nil
         if onComplete then
             onComplete(true)
         end
@@ -792,7 +744,6 @@ local function RunGearSwap(gearSet, onComplete, declinedUpgradeSlots, verifyAtte
 
     local function FinishSwap(ready)
         equipQueueRunning = false
-        swapDeclinedUpgradeSlots = nil
         if onComplete then
             onComplete(ready ~= false)
         end
@@ -848,7 +799,7 @@ local function RunGearSwap(gearSet, onComplete, declinedUpgradeSlots, verifyAtte
             local change = diff.equip[equipIndex]
             equipIndex = equipIndex + 1
 
-            if NeedsEquipForEntry(change.invSlot, change.entry, declinedUpgradeSlots) then
+            if NeedsEquipForEntry(change.invSlot, change.entry) then
                 if not EquipSlot(change.invSlot, change.entry, usedLocations) then
                     Print("Could not equip slot " .. tostring(change.invSlot) .. "; continuing.")
                 end
@@ -910,6 +861,65 @@ function Gear.Save(specID, configID)
     return true
 end
 
+function Gear.DeleteSavedGear(configID, specID)
+    specID = specID or Loadout.GetSpecID()
+    if not specID then
+        Print("No specialization selected.")
+        return false
+    end
+
+    if not configID then
+        Print("No loadout selected.")
+        return false
+    end
+
+    local entry = DB:DeleteGearSet(specID, configID)
+    if not entry then
+        Print("No saved gear set for that loadout.")
+        return false
+    end
+
+    local loadoutName = entry.loadoutName or Loadout.GetLoadoutName(configID)
+    Print(string.format("Removed saved gear for %s.", loadoutName))
+    RefreshUI()
+    return true
+end
+
+function Gear.CopyGearSetToLoadout(sourceConfigID, targetConfigID, specID)
+    specID = specID or Loadout.GetSpecID()
+    if not specID then
+        Print("No specialization selected.")
+        return false
+    end
+
+    if not sourceConfigID or not targetConfigID then
+        Print("Select source and target loadouts.")
+        return false
+    end
+
+    if sourceConfigID == targetConfigID then
+        Print("Source and target loadouts must be different.")
+        return false
+    end
+
+    if Loadout.IsStarterBuild(targetConfigID) then
+        Print("Cannot copy gear to the Starter Build.")
+        return false
+    end
+
+    if not DB:HasGearSet(specID, sourceConfigID) then
+        Print("No saved gear set to copy from that loadout.")
+        return false
+    end
+
+    local sourceName = Loadout.GetLoadoutName(sourceConfigID)
+    local targetName = Loadout.GetLoadoutName(targetConfigID)
+    DB:CopyGearSetToLoadout(specID, sourceConfigID, targetConfigID, targetName)
+    Print(string.format("Copied gear set from %s to %s.", sourceName, targetName))
+    RefreshUI()
+    return true
+end
+
 function Gear.Delete(specID, configID)
     local context = Loadout.GetActive(specID)
     if not context then
@@ -967,14 +977,45 @@ function Gear.ScheduleLoadoutGearApply()
     end)
 end
 
+local function ShouldPromptForUpgrades(options)
+    if options and options.forceUpgradeCheck then
+        return true
+    end
+
+    return DB:AreUpgradeChecksEnabled()
+end
+
 local function PromptAndApplyGear(specID, configID, gearSet, options)
     options = options or {}
     Gear.NormalizeGearSetKeys(gearSet)
 
     local diff = Gear.BuildGearDiff(gearSet)
 
+    if not ShouldPromptForUpgrades(options) then
+
+        if diff.empty then
+            Print(options.alreadyAppliedMessage or "Already wearing saved gear for this loadout.")
+            return
+        end
+
+        ApplyGearSwap(gearSet, function(ready)
+            if not ready then
+                Print("Some gear slots could not be verified after swapping.")
+                return
+            end
+
+            if options.appliedMessage then
+                Print(options.appliedMessage)
+            end
+        end)
+        return
+    end
+
     if options.requireOffers then
-        local offers = LoadoutLocker.Upgrades.FindOffers(gearSet)
+        local offers = LoadoutLocker.Upgrades.FindOffers(gearSet, {
+            specID = specID,
+            configID = configID,
+        })
         if #offers == 0 then
             Print(options.noOffersMessage or "No better items found in your bags.")
             return
@@ -983,7 +1024,10 @@ local function PromptAndApplyGear(specID, configID, gearSet, options)
     end
 
     if diff.empty then
-        local offers = options.offers or LoadoutLocker.Upgrades.FindOffers(gearSet)
+        local offers = options.offers or LoadoutLocker.Upgrades.FindOffers(gearSet, {
+            specID = specID,
+            configID = configID,
+        })
         if #offers == 0 then
             Print(options.alreadyAppliedMessage or "Already wearing saved gear for this loadout.")
             return
@@ -1076,6 +1120,7 @@ function Gear.ScanForUpgrades()
     end
 
     PromptAndApplyGear(context.specID, context.configID, gearSet, {
+        forceUpgradeCheck = true,
         requireOffers = true,
         requireChange = true,
         noOffersMessage = "No better items found in your bags.",

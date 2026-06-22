@@ -39,6 +39,31 @@ Constants.EQUIP_SLOTS = {
     INVSLOT_OFFHAND,
 }
 
+Constants.INV_SLOT_LABELS = {
+    [INVSLOT_HEAD] = "Head",
+    [INVSLOT_NECK] = "Neck",
+    [INVSLOT_SHOULDER] = "Shoulder",
+    [INVSLOT_BODY] = "Shirt",
+    [INVSLOT_CHEST] = "Chest",
+    [INVSLOT_WAIST] = "Waist",
+    [INVSLOT_LEGS] = "Legs",
+    [INVSLOT_FEET] = "Feet",
+    [INVSLOT_WRIST] = "Wrist",
+    [INVSLOT_HAND] = "Hands",
+    [INVSLOT_FINGER1] = "Finger 1",
+    [INVSLOT_FINGER2] = "Finger 2",
+    [INVSLOT_TRINKET1] = "Trinket 1",
+    [INVSLOT_TRINKET2] = "Trinket 2",
+    [INVSLOT_BACK] = "Back",
+    [INVSLOT_MAINHAND] = "Main Hand",
+    [INVSLOT_OFFHAND] = "Off Hand",
+}
+
+function Constants.GetSlotLabel(invSlot)
+    invSlot = tonumber(invSlot) or invSlot
+    return Constants.INV_SLOT_LABELS[invSlot] or ("Slot " .. tostring(invSlot))
+end
+
 Constants.BAGS = {
     Enum.BagIndex.Backpack,
     Enum.BagIndex.Bag_1,
@@ -47,10 +72,25 @@ Constants.BAGS = {
     Enum.BagIndex.Bag_4,
 }
 
-Constants.TERTIARY_PRIORITY = { "sockets", "avoidance", "leech", "speed" }
+Constants.DEFAULT_TERTIARY_PRIORITY = { "sockets", "avoidance", "leech", "speed" }
+Constants.TERTIARY_PRIORITY = Constants.DEFAULT_TERTIARY_PRIORITY
+
+Constants.TERTIARY_FIELDS = {
+    sockets = true,
+    avoidance = true,
+    leech = true,
+    speed = true,
+}
 
 Constants.TERTIARY_LABELS = {
     sockets = "socket",
+    avoidance = "Avoidance",
+    leech = "Leech",
+    speed = "Speed",
+}
+
+Constants.TERTIARY_SETTING_LABELS = {
+    sockets = "Sockets",
     avoidance = "Avoidance",
     leech = "Leech",
     speed = "Speed",

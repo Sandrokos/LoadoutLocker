@@ -108,8 +108,8 @@ local function LayoutUpgradeFrame(frame)
     frame.arrow:ClearAllPoints()
     frame.arrow:SetPoint("TOP", frame, "TOP", 0, arrowOffset)
 
-    local frameHeight = math.abs(panelTop) + panelHeight + 58
-    frame:SetHeight(math.max(360, math.min(frameHeight, 560)))
+    local frameHeight = math.abs(panelTop) + panelHeight + 82
+    frame:SetHeight(math.max(380, math.min(frameHeight, 580)))
 end
 
 local function EnsureUpgradeFrame()
@@ -178,8 +178,15 @@ local function EnsureUpgradeFrame()
         end
         self:Disable()
         frame.acceptButton:Disable()
-        upgradeOnRespond(false)
+        upgradeOnRespond(false, frame.doNotAskCheck:GetChecked())
     end)
+
+    frame.doNotAskCheck = CreateFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
+    frame.doNotAskCheck:SetSize(24, 24)
+    frame.doNotAskCheck:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 24, 44)
+    frame.doNotAskCheck.text = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    frame.doNotAskCheck.text:SetPoint("LEFT", frame.doNotAskCheck, "RIGHT", 2, 0)
+    frame.doNotAskCheck.text:SetText("Do not ask again for this slot")
 
     tinsert(UISpecialFrames, frame:GetName())
     upgradeFrame = frame
@@ -192,6 +199,7 @@ function UI.ShowUpgradeOffer(offer, onRespond)
     local frame = EnsureUpgradeFrame()
     frame.acceptButton:Enable()
     frame.declineButton:Enable()
+    frame.doNotAskCheck:SetChecked(false)
     frame.title:SetText(Upgrades.GetItemDisplayName(offer.candidate.itemID) or "Upgrade Found")
     frame.reason:SetText(offer.reason)
     SetItemPanel(frame.currentPanel, "Saved Item", offer.reference)
