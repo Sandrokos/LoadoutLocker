@@ -16,8 +16,6 @@ Constants.EQUIP_SLOT_DELAY = 0.15
 Constants.LOADOUT_APPLY_DELAY = 0.25
 Constants.SAVE_RETRY_DELAY = 0.15
 Constants.OFFER_ADVANCE_DELAY = 0.05
-Constants.MAX_SAVE_RETRIES = 8
-Constants.MAX_SWAP_VERIFY_RETRIES = 8
 
 Constants.EQUIP_SLOTS = {
     INVSLOT_HEAD,
@@ -73,7 +71,6 @@ Constants.BAGS = {
 }
 
 Constants.DEFAULT_TERTIARY_PRIORITY = { "sockets", "avoidance", "leech", "speed" }
-Constants.TERTIARY_PRIORITY = Constants.DEFAULT_TERTIARY_PRIORITY
 
 Constants.TERTIARY_FIELDS = {
     sockets = true,

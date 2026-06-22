@@ -45,12 +45,8 @@ local function IterGearSetSlots(gearSet)
     return slots
 end
 
-local function GetInstanceLocationKey(profile)
-    return Items.GetLocationKey(profile)
-end
-
 local function IsReservedInstance(profile, reservedInstances)
-    local key = GetInstanceLocationKey(profile)
+    local key = Items.GetLocationKey(profile)
     return key and reservedInstances[key]
 end
 
@@ -98,12 +94,8 @@ RespondToOffer = function(accepted, doNotAskAgain)
     C_Timer.After(C.OFFER_ADVANCE_DELAY, ShowNextOffer)
 end
 
-local function GetItemName(itemID)
+function Upgrades.GetItemDisplayName(itemID)
     return Items.GetDisplayName(itemID)
-end
-
-local function ItemsShareName(itemIDA, itemIDB)
-    return Items.MatchesFamily(itemIDA, itemIDB)
 end
 
 local function MatchTrackEntry(trackString, tierOnly)
@@ -195,10 +187,6 @@ local function TracksAreSameFamily(trackA, trackB)
         and GetTrackLabel(trackA) == GetTrackLabel(trackB)
 end
 
-function Upgrades.GetItemDisplayName(itemID)
-    return GetItemName(itemID)
-end
-
 function Upgrades.GetItemIcon(itemID, itemLink)
     if itemLink and C_Item.GetItemIconByID then
         return C_Item.GetItemIconByID(itemID)
@@ -208,10 +196,6 @@ end
 
 local function GetItemLevel(itemLink, itemLocation)
     return Items.GetItemLevel(itemLink, itemLocation)
-end
-
-local function GetSavedItemLevel(gearEntry)
-    return Items.GetSavedItemLevel(gearEntry)
 end
 
 local function GetItemInfoCandidates(itemLink, itemID)
@@ -526,7 +510,7 @@ local function ApplySavedEntryStats(profile, gearEntry)
         return profile
     end
 
-    local savedLevel = GetSavedItemLevel(gearEntry)
+    local savedLevel = Items.GetSavedItemLevel(gearEntry)
     if savedLevel > 0 then
         profile.itemLevel = savedLevel
     end
@@ -621,6 +605,10 @@ local function ScanTooltipForTertiaries(itemLink)
         return stats
     end
 
+    local function allTertiariesFound()
+        return stats.avoidance > 0 and stats.leech > 0 and stats.speed > 0
+    end
+
     local function considerLine(leftText, rightText, lineType)
         if IsEnchantRelatedTooltipLine(leftText, lineType)
             or IsEnchantRelatedTooltipLine(rightText, lineType) then
@@ -646,6 +634,10 @@ local function ScanTooltipForTertiaries(itemLink)
                 considerLine(line.leftText, line.rightText, line.type)
             end
         end
+    end
+
+    if allTertiariesFound() then
+        return stats
     end
 
     local tooltip = EnsureScanTooltip()
@@ -758,14 +750,6 @@ local function BuildItemProfile(itemIDOrLocation, itemLink, bag, slot, invSlot)
     }
 end
 
-local function ItemMatchesSavedFamily(savedItemID, itemID)
-    return Items.MatchesFamily(savedItemID, itemID)
-end
-
-local function CollectPlayerItemProfiles()
-    return Items.CollectPlayerProfiles()
-end
-
 local function IsBetterBonusProfile(candidate, reference)
     for _, field in ipairs(GetTertiaryPriority()) do
         local candidateValue = candidate[field]
@@ -847,7 +831,7 @@ local function ProfileMatchesSavedEntry(itemLink, gearEntry)
         return itemLink == savedLink
     end
 
-    local savedLevel = GetSavedItemLevel(gearEntry)
+    local savedLevel = Items.GetSavedItemLevel(gearEntry)
     if savedLevel > 0 and itemLink then
         local level = GetItemLevel(itemLink)
         return level > 0 and level == savedLevel
@@ -869,7 +853,7 @@ local function FindReferenceProfile(savedItemID, invSlot, savedItemLink, gearEnt
         for _, itemProfile in ipairs(playerProfiles) do
             if itemProfile.invSlot == invSlot
                 and ProfileMatchesSavedEntry(itemProfile.itemLink, gearEntry)
-                and ItemMatchesSavedFamily(savedItemID, itemProfile.itemID) then
+                and Items.MatchesFamily(savedItemID, itemProfile.itemID) then
                 profile = itemProfile
                 break
             end
@@ -877,15 +861,15 @@ local function FindReferenceProfile(savedItemID, invSlot, savedItemLink, gearEnt
     elseif invSlot then
         local equipped = Items.FromEquippedSlot(invSlot)
         if equipped and ProfileMatchesSavedEntry(equipped.itemLink, gearEntry)
-            and ItemMatchesSavedFamily(savedItemID, equipped.itemID) then
+            and Items.MatchesFamily(savedItemID, equipped.itemID) then
             profile = BuildItemProfile(equipped)
         end
     end
 
     if not profile and playerProfiles then
-        local savedLevel = GetSavedItemLevel(gearEntry)
+        local savedLevel = Items.GetSavedItemLevel(gearEntry)
         for _, itemProfile in ipairs(playerProfiles) do
-            if not ItemMatchesSavedFamily(savedItemID, itemProfile.itemID) then
+            if not Items.MatchesFamily(savedItemID, itemProfile.itemID) then
             elseif invSlot and itemProfile.invSlot == invSlot
                 and not ProfileMatchesSavedEntry(itemProfile.itemLink, gearEntry) then
             elseif ProfileMatchesSavedEntry(itemProfile.itemLink, gearEntry) then
@@ -898,14 +882,14 @@ local function FindReferenceProfile(savedItemID, invSlot, savedItemLink, gearEnt
             end
         end
     elseif not profile then
-        local savedLevel = GetSavedItemLevel(gearEntry)
+        local savedLevel = Items.GetSavedItemLevel(gearEntry)
 
         Items.ForEachBagItem(function(location)
             if profile then
                 return
             end
 
-            if ItemMatchesSavedFamily(savedItemID, location.itemID) then
+            if Items.MatchesFamily(savedItemID, location.itemID) then
                 if ProfileMatchesSavedEntry(location.itemLink, gearEntry) then
                     profile = BuildItemProfile(location)
                 elseif savedLevel > 0 then
@@ -944,7 +928,7 @@ local function ConsiderUpgradeCandidate(profile, referenceProfile, reservedInsta
 end
 
 local function FindBestUpgrade(savedItemID, referenceProfile, reservedInstances, targetInvSlot, playerProfiles)
-    if not GetItemName(savedItemID) or not playerProfiles then
+    if not Items.GetDisplayName(savedItemID) or not playerProfiles then
         return nil
     end
 
@@ -952,7 +936,7 @@ local function FindBestUpgrade(savedItemID, referenceProfile, reservedInstances,
     local bestCandidate
 
     local function consider(profile)
-        if ItemMatchesSavedFamily(savedItemID, profile.itemID) then
+        if Items.MatchesFamily(savedItemID, profile.itemID) then
             bestCandidate = ConsiderUpgradeCandidate(
                 profile,
                 referenceProfile,
@@ -977,30 +961,6 @@ local function FindBestUpgrade(savedItemID, referenceProfile, reservedInstances,
     end
 
     return bestCandidate
-end
-
-function Upgrades.IsLinkBetterThanSavedEntry(itemLink, gearEntry)
-    if not itemLink or not gearEntry then
-        return false
-    end
-
-    local savedID = GetSavedItemID(gearEntry)
-    if not savedID then
-        return false
-    end
-
-    local linkMods = Items.ParseItemLinkModifiers(itemLink)
-    if not linkMods or not ItemsShareName(savedID, linkMods.itemID) then
-        return false
-    end
-
-    if type(gearEntry) == "table" and gearEntry.itemLink and itemLink == gearEntry.itemLink then
-        return false
-    end
-
-    local referenceProfile = FindReferenceProfile(savedID, nil, GetSavedItemLink(gearEntry), gearEntry)
-    local candidateProfile = BuildItemProfile(linkMods.itemID, itemLink)
-    return IsBetterItem(candidateProfile, referenceProfile)
 end
 
 local function DescribeUpgradeReason(candidate, reference)
@@ -1060,7 +1020,7 @@ function Upgrades.FindOffers(gearSet, options)
     local offers = {}
     local reservedInstances = {}
     local offeredSlots = {}
-    local playerProfiles = CollectPlayerItemProfiles()
+    local playerProfiles = Items.CollectPlayerProfiles()
 
     for _, invSlot in ipairs(IterGearSetSlots(gearSet)) do
         local normalizedSlot = Gear.NormalizeInvSlot(invSlot)
@@ -1098,7 +1058,7 @@ function Upgrades.FindOffers(gearSet, options)
                     }
                     offeredSlots[normalizedSlot] = true
 
-                    local key = GetInstanceLocationKey(candidate)
+                    local key = Items.GetLocationKey(candidate)
                     if key then
                         reservedInstances[key] = true
                     end

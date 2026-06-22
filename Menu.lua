@@ -31,11 +31,7 @@ local selectedManageConfigID
 local selectedCopySourceConfigID
 local selectedCopyTargetConfigID
 
-local function RefreshAddonUI()
-    if LoadoutLocker.RefreshTalentUI then
-        LoadoutLocker.RefreshTalentUI()
-    end
-end
+local RefreshUI = LoadoutLocker.RefreshUI
 
 local function FindListEntry(list, configID)
     for _, entry in ipairs(list) do
@@ -50,9 +46,66 @@ local function GetDropdownLabel(list, configID, fallback)
     return entry and entry.name or fallback or "Select..."
 end
 
+local function PositionDropdownList(dropDownFrame)
+    local list = _G.DropDownList1
+    if not list or not list:IsShown() then
+        return
+    end
+
+    local dropdownWidth = dropDownFrame:GetWidth()
+    if dropdownWidth and dropdownWidth > 0 then
+        list:SetWidth(dropdownWidth)
+    end
+
+    list:ClearAllPoints()
+    list:SetPoint("TOPRIGHT", dropDownFrame, "BOTTOMRIGHT", 0, 0)
+    list:SetFrameStrata("FULLSCREEN_DIALOG")
+    list:SetFrameLevel(dropDownFrame:GetFrameLevel() + 20)
+end
+
 local function InitDropdown(dropdown, width)
     UIDropDownMenu_SetWidth(dropdown, width)
+    UIDropDownMenu_JustifyText(dropdown, "LEFT")
     UIDropDownMenu_SetText(dropdown, "Select...")
+end
+
+local dropdownMenuHooked
+
+local function EnsureDropdownMenuHook()
+    if dropdownMenuHooked then
+        return
+    end
+
+    dropdownMenuHooked = true
+
+    hooksecurefunc("ToggleDropDownMenu", function(_, _, dropDownFrame)
+        if not dropDownFrame or not dropDownFrame.GetName then
+            return
+        end
+
+        local name = dropDownFrame:GetName()
+        if not name or name:sub(1, 14) ~= "LoadoutLocker" then
+            return
+        end
+
+        C_Timer.After(0, function()
+            if UIDROPDOWNMENU_OPEN_MENU == name then
+                PositionDropdownList(dropDownFrame)
+            end
+        end)
+    end)
+end
+
+local function PopulateDropdown(list, getLabel, onSelect)
+    for _, entry in ipairs(list) do
+        local info = UIDropDownMenu_CreateInfo()
+        info.text = getLabel(entry)
+        info.notCheckable = true
+        info.func = function()
+            onSelect(entry)
+        end
+        UIDropDownMenu_AddButton(info)
+    end
 end
 
 local function RefreshPriorityRows()
@@ -97,13 +150,15 @@ local function RefreshIgnoredRows(specID, configID)
     loadoutsPanel.clearIgnoredButton:SetEnabled(#slots > 0)
 end
 
-local function RefreshManageDropdown()
-    local specID = Loadout.GetSpecID()
-    if not specID then
-        return
+local function SelectFirstExcluding(list, excludeID)
+    for _, entry in ipairs(list) do
+        if entry.configID ~= excludeID then
+            return entry.configID
+        end
     end
+end
 
-    local savedSets = DB:GetSavedGearSetList(specID)
+local function RefreshManageDropdown(specID, savedSets)
     if #savedSets == 0 then
         selectedManageConfigID = nil
         UIDropDownMenu_SetText(loadoutsPanel.manageDropdown, "No saved gear sets")
@@ -122,13 +177,7 @@ local function RefreshManageDropdown()
     loadoutsPanel.deleteButton:SetEnabled(selectedManageConfigID ~= nil)
 end
 
-local function RefreshCopyDropdowns()
-    local specID = Loadout.GetSpecID()
-    if not specID then
-        return
-    end
-
-    local savedSets = DB:GetSavedGearSetList(specID)
+local function RefreshCopyDropdowns(specID, savedSets)
     local loadouts = Loadout.GetConfigList(specID)
 
     if #savedSets == 0 then
@@ -149,22 +198,11 @@ local function RefreshCopyDropdowns()
         UIDropDownMenu_SetText(loadoutsPanel.copyTargetDropdown, "No loadouts found")
     else
         if not selectedCopyTargetConfigID or not FindListEntry(loadouts, selectedCopyTargetConfigID) then
-            for _, entry in ipairs(loadouts) do
-                if entry.configID ~= selectedCopySourceConfigID then
-                    selectedCopyTargetConfigID = entry.configID
-                    break
-                end
-            end
+            selectedCopyTargetConfigID = SelectFirstExcluding(loadouts, selectedCopySourceConfigID)
         end
 
         if selectedCopyTargetConfigID == selectedCopySourceConfigID then
-            selectedCopyTargetConfigID = nil
-            for _, entry in ipairs(loadouts) do
-                if entry.configID ~= selectedCopySourceConfigID then
-                    selectedCopyTargetConfigID = entry.configID
-                    break
-                end
-            end
+            selectedCopyTargetConfigID = SelectFirstExcluding(loadouts, selectedCopySourceConfigID)
         end
 
         UIDropDownMenu_SetText(
@@ -185,8 +223,14 @@ local function RefreshLoadoutsPanel()
         return
     end
 
-    RefreshManageDropdown()
-    RefreshCopyDropdowns()
+    local specID = Loadout.GetSpecID()
+    if not specID then
+        return
+    end
+
+    local savedSets = DB:GetSavedGearSetList(specID)
+    RefreshManageDropdown(specID, savedSets)
+    RefreshCopyDropdowns(specID, savedSets)
 end
 
 local function SelectTab(tabID)
@@ -330,6 +374,8 @@ local function CreateIgnoredRow(parent, index)
 end
 
 local function CreateLoadoutsPanel(parent)
+    EnsureDropdownMenuHook()
+
     local panel = CreateFrame("Frame", nil, parent)
     panel:SetPoint("TOPLEFT", parent, "TOPLEFT", 16, -72)
     panel:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -16, 48)
@@ -348,24 +394,21 @@ local function CreateLoadoutsPanel(parent)
             return
         end
 
-        local savedSets = DB:GetSavedGearSetList(specID)
-        for _, entry in ipairs(savedSets) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = entry.name
-            info.func = function()
+        PopulateDropdown(
+            DB:GetSavedGearSetList(specID),
+            function(entry) return entry.name end,
+            function(entry)
                 selectedManageConfigID = entry.configID
                 UIDropDownMenu_SetText(panel.manageDropdown, entry.name)
                 RefreshIgnoredRows(specID, selectedManageConfigID)
                 panel.deleteButton:SetEnabled(true)
-                RefreshCopyDropdowns()
+                RefreshLoadoutsPanel()
             end
-            info.checked = selectedManageConfigID == entry.configID
-            UIDropDownMenu_AddButton(info)
-        end
+        )
     end)
 
     panel.ignoredLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    panel.ignoredLabel:SetPoint("TOPLEFT", panel.manageDropdown, "BOTTOMLEFT", 16, -12)
+    panel.ignoredLabel:SetPoint("TOPLEFT", panel.manageDropdown, "BOTTOMLEFT", 16, -8)
     panel.ignoredLabel:SetText("Ignored upgrade slots")
 
     panel.ignoredContainer = CreateFrame("Frame", nil, panel)
@@ -419,17 +462,15 @@ local function CreateLoadoutsPanel(parent)
             return
         end
 
-        for _, entry in ipairs(DB:GetSavedGearSetList(specID)) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = entry.name
-            info.func = function()
+        PopulateDropdown(
+            DB:GetSavedGearSetList(specID),
+            function(entry) return entry.name end,
+            function(entry)
                 selectedCopySourceConfigID = entry.configID
                 UIDropDownMenu_SetText(panel.copySourceDropdown, entry.name)
-                RefreshCopyDropdowns()
+                RefreshLoadoutsPanel()
             end
-            info.checked = selectedCopySourceConfigID == entry.configID
-            UIDropDownMenu_AddButton(info)
-        end
+        )
     end)
 
     panel.copyTargetLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
@@ -445,17 +486,17 @@ local function CreateLoadoutsPanel(parent)
             return
         end
 
-        for _, entry in ipairs(Loadout.GetConfigList(specID)) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = entry.hasSavedGear and (entry.name .. " (saved)") or entry.name
-            info.func = function()
+        PopulateDropdown(
+            Loadout.GetConfigList(specID),
+            function(entry)
+                return entry.hasSavedGear and (entry.name .. " (saved)") or entry.name
+            end,
+            function(entry)
                 selectedCopyTargetConfigID = entry.configID
                 UIDropDownMenu_SetText(panel.copyTargetDropdown, entry.name)
-                RefreshCopyDropdowns()
+                RefreshLoadoutsPanel()
             end
-            info.checked = selectedCopyTargetConfigID == entry.configID
-            UIDropDownMenu_AddButton(info)
-        end
+        )
     end)
 
     panel.copyButton = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
@@ -465,7 +506,7 @@ local function CreateLoadoutsPanel(parent)
     panel.copyButton:SetScript("OnClick", function()
         if Gear.CopyGearSetToLoadout(selectedCopySourceConfigID, selectedCopyTargetConfigID) then
             RefreshLoadoutsPanel()
-            RefreshAddonUI()
+            RefreshUI()
         end
     end)
 
@@ -603,11 +644,4 @@ function Menu.RegisterWithSettings()
     optionsCategory.ID = "LoadoutLocker"
     Settings.RegisterAddOnCategory(optionsCategory)
     optionsRegistered = true
-end
-
-function Menu.OpenInGameOptions()
-    Menu.RegisterWithSettings()
-    if optionsCategory then
-        Settings.OpenToCategory(optionsCategory:GetID())
-    end
 end

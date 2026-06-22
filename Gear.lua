@@ -90,14 +90,6 @@ local function ItemLinkEquals(linkA, linkB)
     return linkA and linkB and linkA == linkB
 end
 
-local function GetLinkItemLevel(itemLink)
-    return Items.GetItemLevel(itemLink)
-end
-
-local function GetSavedItemLevel(entry)
-    return Items.GetSavedItemLevel(entry)
-end
-
 local function ItemLinkMatchesEntry(itemLink, entry)
     if not itemLink or not entry then
         return false
@@ -121,9 +113,9 @@ local function ItemLinkMatchesEntry(itemLink, entry)
         return false
     end
 
-    local savedLevel = GetSavedItemLevel(entry)
+    local savedLevel = Items.GetSavedItemLevel(entry)
     if savedLevel > 0 then
-        local candidateLevel = GetLinkItemLevel(itemLink)
+        local candidateLevel = Items.GetItemLevel(itemLink)
         if candidateLevel > 0 and candidateLevel ~= savedLevel then
             return false
         end
@@ -134,14 +126,6 @@ end
 
 local function CreateGearEntry(itemID, itemLink)
     return Items.ToGearEntry({ itemID = itemID, itemLink = itemLink })
-end
-
-function Gear.ParseItemLinkModifiers(itemLink)
-    return Items.ParseItemLinkModifiers(itemLink)
-end
-
-function Gear.CreateGearEntryFromLink(itemID, itemLink, bag, slot)
-    return Items.ToGearEntryFromLink(itemID, itemLink, bag, slot)
 end
 
 local function SnapshotEquippedGear()
@@ -257,39 +241,19 @@ local function MergeGearSnapshot(snapshot, expectedGearSet)
     return snapshot
 end
 
-local function ExpectedGearReady(expectedGearSet)
-    Gear.NormalizeGearSetKeys(expectedGearSet)
-
-    for _, invSlot in ipairs(C.EQUIP_SLOTS) do
-        local entry = Gear.GetGearSetEntry(expectedGearSet, invSlot)
-        if entry then
-            local equippedLink = GetInventoryItemLink("player", invSlot)
-            if not ItemLinkMatchesEntry(equippedLink, entry) then
-                return false
-            end
-        end
-    end
-
-    return true
-end
-
 local function SaveEquippedGearSet(specID, configID, expectedGearSet)
     local snapshot = MergeGearSnapshot(SnapshotEquippedGear(), expectedGearSet)
     DB:CreateOrUpdateGearSet(specID, configID, snapshot, Loadout.GetLoadoutName(configID))
     RefreshUI()
 end
 
-local function ScheduleSaveEquippedGearSet(specID, configID, expectedGearSet, attemptsLeft)
-    attemptsLeft = attemptsLeft or C.MAX_SAVE_RETRIES
+local function ReportSwapIssue(reported, key, message)
+    if reported[key] then
+        return
+    end
 
-    C_Timer.After(C.SAVE_RETRY_DELAY, function()
-        if expectedGearSet and not ExpectedGearReady(expectedGearSet) and attemptsLeft > 1 then
-            ScheduleSaveEquippedGearSet(specID, configID, expectedGearSet, attemptsLeft - 1)
-            return
-        end
-
-        SaveEquippedGearSet(specID, configID, expectedGearSet)
-    end)
+    reported[key] = true
+    Print(message)
 end
 
 local function BuildNeededItems(gearSet)
@@ -336,21 +300,7 @@ local function ShouldUnequipSlot(invSlot, gearSet, neededItems)
     return true
 end
 
-local function DiffSlotFilter(diff)
-    local slots = {}
-
-    for _, invSlot in ipairs(diff.unequip) do
-        slots[Gear.NormalizeInvSlot(invSlot)] = true
-    end
-
-    for _, change in ipairs(diff.equip) do
-        slots[Gear.NormalizeInvSlot(change.invSlot)] = true
-    end
-
-    return slots
-end
-
-function Gear.BuildGearDiff(targetGearSet, declinedUpgradeSlots)
+function Gear.BuildGearDiff(targetGearSet)
     local diff = {
         unequip = {},
         equip = {},
@@ -384,8 +334,8 @@ function Gear.BuildGearDiff(targetGearSet, declinedUpgradeSlots)
     return diff
 end
 
-function Gear.ValidateGearDiff(targetGearSet, declinedUpgradeSlots)
-    local diff = Gear.BuildGearDiff(targetGearSet, declinedUpgradeSlots)
+function Gear.ValidateGearDiff(targetGearSet)
+    local diff = Gear.BuildGearDiff(targetGearSet)
     return diff.empty, diff
 end
 
@@ -446,7 +396,6 @@ local function UnequipToBag(invSlot, reservedBagSlots)
 
     local bag, slot, locationKey = FindEmptyBagSlot(reservedBagSlots)
     if not bag then
-        Print("Not enough bag space to swap gear.")
         return false
     end
 
@@ -459,46 +408,17 @@ local function UnequipToBag(invSlot, reservedBagSlots)
     return true
 end
 
-local function FindItemInBagsByLink(itemLink, usedLocations, gearEntry)
-    if not itemLink and not gearEntry then
-        return
-    end
-
-    local found
-
-    Items.ForEachBagItem(function(location)
-        if found then
-            return
-        end
-
-        local locationKey = Items.GetLocationKey(location)
-        if not usedLocations[locationKey] and location.itemLink then
-            if gearEntry and ItemLinkMatchesEntry(location.itemLink, gearEntry) then
-                found = { "bag", location.bag, location.slot, locationKey }
-            elseif itemLink and ItemLinkEquals(location.itemLink, itemLink) then
-                found = { "bag", location.bag, location.slot, locationKey }
-            end
-        end
-    end)
-
-    if found then
-        return found[1], found[2], found[3], found[4]
-    end
-end
-
-local function FindItemInBagsByModifiers(entry, usedLocations)
-    local modifiers = GetEntryModifiers(entry)
-    if not modifiers.itemID then
-        return
-    end
-
-    local savedLevel = GetSavedItemLevel(entry)
-    local bestSource, bestBag, bestSlot, bestKey, bestDistance
-
-    local exactMatch
+local function FindItemInBags(itemID, itemLink, usedLocations, gearEntry)
+    local linkMatch
+    local exactModifierMatch
+    local bestModifierBag, bestModifierSlot, bestModifierKey, bestModifierDistance
+    local itemIDMatchBag, itemIDMatchSlot, itemIDMatchKey
+    local savedLevel = gearEntry and Items.GetSavedItemLevel(gearEntry) or 0
+    local requireModifier = gearEntry and EntryRequiresModifierMatch(gearEntry)
+    local canSearchByModifiers = gearEntry and GetEntryModifiers(gearEntry).itemID
 
     Items.ForEachBagItem(function(location)
-        if exactMatch then
+        if linkMatch or exactModifierMatch then
             return
         end
 
@@ -508,68 +428,62 @@ local function FindItemInBagsByModifiers(entry, usedLocations)
         end
 
         local link = location.itemLink
-        if type(entry) == "table" and ItemLinkEquals(link, entry.itemLink) then
-            exactMatch = { "bag", location.bag, location.slot, locationKey }
-            return
+        if link then
+            if gearEntry and ItemLinkMatchesEntry(link, gearEntry) then
+                linkMatch = { "bag", location.bag, location.slot, locationKey }
+                return
+            end
+
+            if itemLink and ItemLinkEquals(link, itemLink) then
+                linkMatch = { "bag", location.bag, location.slot, locationKey }
+                return
+            end
+
+            if canSearchByModifiers then
+                if type(gearEntry) == "table" and ItemLinkEquals(link, gearEntry.itemLink) then
+                    exactModifierMatch = { "bag", location.bag, location.slot, locationKey }
+                    return
+                end
+
+                if ItemLinkMatchesEntry(link, gearEntry) then
+                    local distance = 0
+                    if savedLevel > 0 then
+                        local level = Items.GetItemLevel(link)
+                        distance = level > 0 and math.abs(level - savedLevel) or math.huge
+                    end
+
+                    if not bestModifierBag or distance < bestModifierDistance then
+                        bestModifierBag = location.bag
+                        bestModifierSlot = location.slot
+                        bestModifierKey = locationKey
+                        bestModifierDistance = distance
+                    end
+                end
+            end
         end
 
-        if ItemLinkMatchesEntry(link, entry) then
-            local distance = 0
-            if savedLevel > 0 then
-                local level = GetLinkItemLevel(link)
-                distance = level > 0 and math.abs(level - savedLevel) or math.huge
-            end
-            if not bestSource or distance < bestDistance then
-                bestSource = "bag"
-                bestBag = location.bag
-                bestSlot = location.slot
-                bestKey = locationKey
-                bestDistance = distance
-            end
+        if not requireModifier and not itemIDMatchBag and location.itemID == itemID then
+            itemIDMatchBag = location.bag
+            itemIDMatchSlot = location.slot
+            itemIDMatchKey = locationKey
         end
     end)
 
-    if exactMatch then
-        return exactMatch[1], exactMatch[2], exactMatch[3], exactMatch[4]
+    if linkMatch then
+        return linkMatch[1], linkMatch[2], linkMatch[3], linkMatch[4]
     end
 
-    if bestSource then
-        return bestSource, bestBag, bestSlot, bestKey
-    end
-end
-
-local function FindItemInBags(itemID, itemLink, usedLocations, gearEntry)
-    local sourceType, bag, slot, locationKey = FindItemInBagsByLink(itemLink, usedLocations, gearEntry)
-    if sourceType then
-        return sourceType, bag, slot, locationKey
+    if exactModifierMatch then
+        return exactModifierMatch[1], exactModifierMatch[2], exactModifierMatch[3], exactModifierMatch[4]
     end
 
-    if gearEntry then
-        sourceType, bag, slot, locationKey = FindItemInBagsByModifiers(gearEntry, usedLocations)
-        if sourceType then
-            return sourceType, bag, slot, locationKey
-        end
+    if bestModifierBag then
+        return "bag", bestModifierBag, bestModifierSlot, bestModifierKey
     end
 
-    if gearEntry and EntryRequiresModifierMatch(gearEntry) then
-        return
+    if itemIDMatchBag then
+        return "bag", itemIDMatchBag, itemIDMatchSlot, itemIDMatchKey
     end
-
-    Items.ForEachBagItem(function(location)
-        if sourceType then
-            return
-        end
-
-        local locationKey = Items.GetLocationKey(location)
-        if not usedLocations[locationKey] and location.itemID == itemID then
-            sourceType = "bag"
-            bag = location.bag
-            slot = location.slot
-            locationKey = locationKey
-        end
-    end)
-
-    return sourceType, bag, slot, locationKey
 end
 
 local function FindItemOnPlayer(itemID, itemLink, targetSlot, usedLocations, gearEntry)
@@ -679,7 +593,6 @@ local function EquipSlot(invSlot, gearEntry, usedLocations)
 
     local sourceType, arg1, arg2, locationKey = FindItemOnPlayer(itemID, itemLink, invSlot, usedLocations, gearEntry)
     if not sourceType then
-        Print("Missing item: " .. Items.GetDisplayName(itemID))
         return false
     end
 
@@ -698,22 +611,28 @@ local function EquipSlot(invSlot, gearEntry, usedLocations)
     return true
 end
 
-local function PrintGearDiffFailures(diff)
+local function PrintGearDiffFailures(diff, reported)
+    reported = reported or {}
+
     for _, change in ipairs(diff.equip) do
         local itemID = ResolveGearEntry(change.entry)
-        Print(string.format(
-            "Slot %d still needs: %s",
-            change.invSlot,
-            Items.GetDisplayName(itemID)
-        ))
+        ReportSwapIssue(
+            reported,
+            "missing:" .. tostring(itemID),
+            "Missing item: " .. Items.GetDisplayName(itemID)
+        )
     end
 
     for _, invSlot in ipairs(diff.unequip) do
-        Print(string.format("Slot %d still has the wrong item equipped.", invSlot))
+        ReportSwapIssue(
+            reported,
+            "unequip:" .. tostring(invSlot),
+            string.format("Slot %d still has the wrong item equipped.", invSlot)
+        )
     end
 end
 
-local function RunGearSwap(gearSet, onComplete, declinedUpgradeSlots, verifyAttempt)
+local function RunGearSwap(gearSet, onComplete, gearDiff)
     if equipQueueRunning then
         return
     end
@@ -722,10 +641,9 @@ local function RunGearSwap(gearSet, onComplete, declinedUpgradeSlots, verifyAtte
         return
     end
 
-    verifyAttempt = verifyAttempt or 1
     Gear.NormalizeGearSetKeys(gearSet)
 
-    local diff = Gear.BuildGearDiff(gearSet, declinedUpgradeSlots)
+    local diff = gearDiff or Gear.BuildGearDiff(gearSet)
     OrderSwapDiff(diff)
     if diff.empty then
         if onComplete then
@@ -735,6 +653,7 @@ local function RunGearSwap(gearSet, onComplete, declinedUpgradeSlots, verifyAtte
     end
 
     equipQueueRunning = true
+    local reported = {}
     local neededItems = BuildNeededItems(gearSet)
     local usedLocations = {}
     local reservedBagSlots = {}
@@ -751,19 +670,13 @@ local function RunGearSwap(gearSet, onComplete, declinedUpgradeSlots, verifyAtte
 
     local function VerifyAndComplete()
         C_Timer.After(C.SAVE_RETRY_DELAY, function()
-            local ready, remaining = Gear.ValidateGearDiff(gearSet, declinedUpgradeSlots)
+            local ready, remaining = Gear.ValidateGearDiff(gearSet)
             if ready then
                 FinishSwap(true)
                 return
             end
 
-            if verifyAttempt < C.MAX_SWAP_VERIFY_RETRIES then
-                equipQueueRunning = false
-                RunGearSwap(gearSet, onComplete, declinedUpgradeSlots, verifyAttempt + 1)
-                return
-            end
-
-            PrintGearDiffFailures(remaining)
+            PrintGearDiffFailures(remaining, reported)
             FinishSwap(false)
         end)
     end
@@ -783,7 +696,11 @@ local function RunGearSwap(gearSet, onComplete, declinedUpgradeSlots, verifyAtte
 
                 if ShouldUnequipSlot(invSlot, gearSet, neededItems) then
                     if not UnequipToBag(invSlot, reservedBagSlots) then
-                        Print("Could not unequip slot " .. tostring(invSlot) .. "; continuing.")
+                        ReportSwapIssue(
+                            reported,
+                            "bagspace",
+                            "Not enough bag space to swap gear."
+                        )
                     end
                     C_Timer.After(C.EQUIP_SLOT_DELAY, Step)
                     return
@@ -801,7 +718,12 @@ local function RunGearSwap(gearSet, onComplete, declinedUpgradeSlots, verifyAtte
 
             if NeedsEquipForEntry(change.invSlot, change.entry) then
                 if not EquipSlot(change.invSlot, change.entry, usedLocations) then
-                    Print("Could not equip slot " .. tostring(change.invSlot) .. "; continuing.")
+                    local itemID = ResolveGearEntry(change.entry)
+                    ReportSwapIssue(
+                        reported,
+                        "missing:" .. tostring(itemID),
+                        "Missing item: " .. Items.GetDisplayName(itemID)
+                    )
                 end
                 C_Timer.After(C.EQUIP_SLOT_DELAY, Step)
                 return
@@ -814,7 +736,7 @@ local function RunGearSwap(gearSet, onComplete, declinedUpgradeSlots, verifyAtte
     Step()
 end
 
-local function ApplyGearSwap(gearSet, onComplete, declinedUpgradeSlots)
+local function ApplyGearSwap(gearSet, onComplete, gearDiff)
     if not gearSet or not next(gearSet) then
         return
     end
@@ -825,16 +747,15 @@ local function ApplyGearSwap(gearSet, onComplete, declinedUpgradeSlots)
         return
     end
 
-    RunGearSwap(gearSet, onComplete, declinedUpgradeSlots)
+    RunGearSwap(gearSet, onComplete, gearDiff)
 end
 
-function Gear.EquipGearSetAndSave(specID, configID, gearSet, onComplete)
-    ApplyGearSwap(gearSet, function()
-        ScheduleSaveEquippedGearSet(specID, configID, gearSet)
-        if onComplete then
-            onComplete()
-        end
-    end)
+local function RequireSpecID(specID)
+    specID = specID or Loadout.GetSpecID()
+    if not specID then
+        Print("No specialization selected.")
+    end
+    return specID
 end
 
 function Gear.Save(specID, configID)
@@ -861,10 +782,9 @@ function Gear.Save(specID, configID)
     return true
 end
 
-function Gear.DeleteSavedGear(configID, specID)
-    specID = specID or Loadout.GetSpecID()
+function Gear.DeleteSavedGear(configID, specID, notFoundMessage)
+    specID = RequireSpecID(specID)
     if not specID then
-        Print("No specialization selected.")
         return false
     end
 
@@ -875,7 +795,7 @@ function Gear.DeleteSavedGear(configID, specID)
 
     local entry = DB:DeleteGearSet(specID, configID)
     if not entry then
-        Print("No saved gear set for that loadout.")
+        Print(notFoundMessage or "No saved gear set for that loadout.")
         return false
     end
 
@@ -886,9 +806,8 @@ function Gear.DeleteSavedGear(configID, specID)
 end
 
 function Gear.CopyGearSetToLoadout(sourceConfigID, targetConfigID, specID)
-    specID = specID or Loadout.GetSpecID()
+    specID = RequireSpecID(specID)
     if not specID then
-        Print("No specialization selected.")
         return false
     end
 
@@ -927,26 +846,16 @@ function Gear.Delete(specID, configID)
         return false
     end
 
-    if configID then
-        context.configID = configID
-    end
-
-    local entry = DB:DeleteGearSet(context.specID, context.configID)
-    if not entry then
-        Print("No saved gear set for the current talent loadout.")
-        return false
-    end
-
-    local loadoutName = entry.loadoutName or context.name
-    Print(string.format("Removed saved gear for %s.", loadoutName))
-    RefreshUI()
-    return true
+    return Gear.DeleteSavedGear(
+        configID or context.configID,
+        context.specID,
+        "No saved gear set for the current talent loadout."
+    )
 end
 
 function Gear.List(specID)
-    specID = specID or Loadout.GetSpecID()
+    specID = RequireSpecID(specID)
     if not specID then
-        Print("No specialization selected.")
         return
     end
 
@@ -992,7 +901,6 @@ local function PromptAndApplyGear(specID, configID, gearSet, options)
     local diff = Gear.BuildGearDiff(gearSet)
 
     if not ShouldPromptForUpgrades(options) then
-
         if diff.empty then
             Print(options.alreadyAppliedMessage or "Already wearing saved gear for this loadout.")
             return
@@ -1000,54 +908,48 @@ local function PromptAndApplyGear(specID, configID, gearSet, options)
 
         ApplyGearSwap(gearSet, function(ready)
             if not ready then
-                Print("Some gear slots could not be verified after swapping.")
                 return
             end
 
             if options.appliedMessage then
                 Print(options.appliedMessage)
             end
-        end)
+        end, diff)
         return
     end
 
-    if options.requireOffers then
-        local offers = LoadoutLocker.Upgrades.FindOffers(gearSet, {
-            specID = specID,
-            configID = configID,
-        })
-        if #offers == 0 then
-            Print(options.noOffersMessage or "No better items found in your bags.")
-            return
-        end
-        options.offers = offers
+    local findOptions = {
+        specID = specID,
+        configID = configID,
+    }
+    if not options.offers then
+        options.offers = LoadoutLocker.Upgrades.FindOffers(gearSet, findOptions)
     end
 
-    if diff.empty then
-        local offers = options.offers or LoadoutLocker.Upgrades.FindOffers(gearSet, {
-            specID = specID,
-            configID = configID,
-        })
-        if #offers == 0 then
-            Print(options.alreadyAppliedMessage or "Already wearing saved gear for this loadout.")
-            return
-        end
+    if options.requireOffers and #options.offers == 0 then
+        Print(options.noOffersMessage or "No better items found in your bags.")
+        return
+    end
+
+    if diff.empty and #options.offers == 0 then
+        Print(options.alreadyAppliedMessage or "Already wearing saved gear for this loadout.")
+        return
     end
 
     LoadoutLocker.Upgrades.PromptForBetterItems(gearSet, {
         specID = specID,
         configID = configID,
         offers = options.offers,
-        onComplete = function(updatedGearSet, changed, declinedSlots)
+        onComplete = function(updatedGearSet, changed)
             if options.requireChange and not changed then
                 Print(options.noChangeMessage or "No upgrades selected.")
                 return
             end
 
-            local swapDiff = Gear.BuildGearDiff(updatedGearSet, declinedSlots)
+            local swapDiff = Gear.BuildGearDiff(updatedGearSet)
             if swapDiff.empty then
                 if changed then
-                    ScheduleSaveEquippedGearSet(specID, configID, updatedGearSet)
+                    SaveEquippedGearSet(specID, configID, updatedGearSet)
                     Print(options.upgradedMessage or "Applied and saved upgraded gear set.")
                 elseif options.appliedMessage then
                     Print(options.appliedMessage)
@@ -1059,23 +961,22 @@ local function PromptAndApplyGear(specID, configID, gearSet, options)
 
             ApplyGearSwap(updatedGearSet, function(ready)
                 if not ready then
-                    Print("Some gear slots could not be verified after swapping.")
                     return
                 end
 
                 if changed then
-                    ScheduleSaveEquippedGearSet(specID, configID, updatedGearSet)
+                    SaveEquippedGearSet(specID, configID, updatedGearSet)
                     Print(options.upgradedMessage or "Applied and saved upgraded gear set.")
                 elseif options.appliedMessage then
                     Print(options.appliedMessage)
                 end
-            end, declinedSlots)
+            end, swapDiff)
         end,
     })
 end
 
 function Gear.ApplyGearForLoadoutChange()
-    if LoadoutLocker.Upgrades.IsPromptActive() then
+    if LoadoutLocker.Upgrades.IsPromptActive() or equipQueueRunning then
         return
     end
 
