@@ -46,7 +46,7 @@ function Items.GemsMatch(gemsA, gemsB)
 end
 
 function Items.GetGemSlotCount(itemLink, itemID)
-    if C_Item and C_Item.GetItemNumSockets then
+    if C_Item.GetItemNumSockets then
         for _, itemInfo in ipairs(Items.GetItemInfoCandidates(itemLink, itemID)) do
             local ok, socketCount = pcall(C_Item.GetItemNumSockets, itemInfo)
             if ok and type(socketCount) == "number" and socketCount >= 0 then
@@ -151,13 +151,10 @@ function Items.ScanHyperlinkText(itemLink, frameName, textCallback)
     end)
 end
 
-local function TooltipLineMentionsEmbellishment(text)
-    return text and text ~= "" and text:find("Embellish", 1, true) ~= nil
-end
-
 local function ScanHyperlinkEmbellishment(itemLink)
     return Items.ForEachHyperlinkTooltipLine(itemLink, "LoadoutLockerItemsScanTooltip", function(leftText, rightText)
-        if TooltipLineMentionsEmbellishment(leftText) or TooltipLineMentionsEmbellishment(rightText) then
+        if (leftText and leftText:find("Embellish", 1, true))
+            or (rightText and rightText:find("Embellish", 1, true)) then
             return true
         end
     end) or false
@@ -391,17 +388,13 @@ function Items.ToGearEntry(location)
     return location.itemID
 end
 
-function Items.ToComparisonProfile(location)
-    return LoadoutLocker.Upgrades.BuildComparisonProfile(location)
-end
-
 function Items.CollectPlayerProfiles(gearSet)
     local savedItemIDs
 
     if gearSet then
         savedItemIDs = {}
         for _, entry in pairs(gearSet) do
-            local itemID = type(entry) == "table" and entry.itemID or entry
+            local itemID = LoadoutLocker.Gear.GetEntryItemID(entry)
             if itemID then
                 savedItemIDs[itemID] = true
             end
@@ -424,7 +417,7 @@ function Items.CollectPlayerProfiles(gearSet)
             end
         end
 
-        profiles[#profiles + 1] = Items.ToComparisonProfile(location)
+        profiles[#profiles + 1] = LoadoutLocker.Upgrades.BuildComparisonProfile(location)
     end)
 
     return profiles

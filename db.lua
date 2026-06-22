@@ -8,6 +8,10 @@ LoadoutLockerDB = LoadoutLockerDB or {}
 local C = LoadoutLocker.Constants
 local cachedTertiaryPriority
 
+local function NormalizeInvSlot(invSlot)
+    return LoadoutLocker.Gear.NormalizeInvSlot(invSlot)
+end
+
 local function InvalidateTertiaryPriorityCache()
     cachedTertiaryPriority = nil
 end
@@ -40,9 +44,6 @@ local function NormalizeGearEntry(entry)
     end
 
     local itemID = tonumber(entry) or entry
-    if not itemID then
-        return entry
-    end
 
     local itemLink = Items and Items.ResolveItemLink(itemID)
     if itemLink and Items then
@@ -144,10 +145,6 @@ function DB:MoveTertiaryPriority(field, direction)
     return true
 end
 
-function DB:NormalizeInvSlot(invSlot)
-    return LoadoutLocker.Gear.NormalizeInvSlot(invSlot)
-end
-
 function DB:GetIgnoredUpgradeSlots(specID, configID)
     local entry = self:GetEntry(specID, configID)
     return entry and entry.ignoredUpgradeSlots
@@ -159,7 +156,7 @@ function DB:IsUpgradeSlotIgnored(specID, configID, invSlot)
         return false
     end
 
-    return ignored[self:NormalizeInvSlot(invSlot)] or false
+    return ignored[NormalizeInvSlot(invSlot)] or false
 end
 
 function DB:GetIgnoredUpgradeSlotList(specID, configID)
@@ -170,7 +167,7 @@ function DB:GetIgnoredUpgradeSlotList(specID, configID)
 
     local slots = {}
     for slot in pairs(ignored) do
-        slots[#slots + 1] = self:NormalizeInvSlot(slot)
+        slots[#slots + 1] = NormalizeInvSlot(slot)
     end
 
     table.sort(slots)
@@ -184,7 +181,7 @@ function DB:SetIgnoredUpgradeSlot(specID, configID, invSlot)
     end
 
     entry.ignoredUpgradeSlots = entry.ignoredUpgradeSlots or {}
-    entry.ignoredUpgradeSlots[self:NormalizeInvSlot(invSlot)] = true
+    entry.ignoredUpgradeSlots[NormalizeInvSlot(invSlot)] = true
     return true
 end
 
@@ -194,7 +191,7 @@ function DB:ClearIgnoredUpgradeSlot(specID, configID, invSlot)
         return false
     end
 
-    entry.ignoredUpgradeSlots[self:NormalizeInvSlot(invSlot)] = nil
+    entry.ignoredUpgradeSlots[NormalizeInvSlot(invSlot)] = nil
 
     if not next(entry.ignoredUpgradeSlots) then
         entry.ignoredUpgradeSlots = nil
@@ -224,14 +221,12 @@ function DB:GetSavedGearSetList(specID)
         if entry.gear then
             list[#list + 1] = {
                 configID = configID,
-                name = entry.loadoutName or LoadoutLocker.Loadout.GetLoadoutName(configID),
+                name = LoadoutLocker.Loadout.ResolveLoadoutName(configID, entry.loadoutName),
             }
         end
     end
 
-    table.sort(list, function(a, b)
-        return a.name < b.name
-    end)
+    LoadoutLocker.Loadout.SortByName(list)
 
     return list
 end
@@ -259,7 +254,7 @@ function DB:CopyGearSet(gear)
     local copy = {}
 
     for slot, entry in pairs(gear) do
-        copy[self:NormalizeInvSlot(slot)] = NormalizeGearEntry(entry)
+        copy[NormalizeInvSlot(slot)] = NormalizeGearEntry(entry)
     end
 
     return copy

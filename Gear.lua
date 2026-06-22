@@ -129,27 +129,27 @@ local function ItemLinkMatchesEntry(itemLink, entry, entryMods, options)
     return true
 end
 
-local function SlotEntryMatchesEquipped(invSlot, entry)
-    local itemLink = GetInventoryItemLink("player", invSlot)
-    if not itemLink or not entry then
+local function SlotEntryMatchesEquipped(invSlot, entry, equippedLink, equippedItemID)
+    equippedLink = equippedLink or GetInventoryItemLink("player", invSlot)
+    if not equippedLink or not entry then
         return false
     end
 
-    if ItemLinkMatchesEntry(itemLink, entry) then
+    if ItemLinkMatchesEntry(equippedLink, entry, nil, { matchSavedLevel = true }) then
         return true
     end
 
-    local itemID = GetInventoryItemID("player", invSlot)
-    local entryItemID = type(entry) == "table" and entry.itemID or entry
+    if type(entry) == "table" and entry.itemLink then
+        return false
+    end
+
+    local itemID = equippedItemID or GetInventoryItemID("player", invSlot)
+    local entryItemID = Gear.GetEntryItemID(entry)
     if not itemID or itemID ~= entryItemID then
         return false
     end
 
-    if type(entry) == "table" and entry.itemLink and not EntryRequiresModifierMatch(entry) then
-        return true
-    end
-
-    local linkMods = Items.ParseItemLinkModifiers(itemLink)
+    local linkMods = Items.ParseItemLinkModifiers(equippedLink)
     local entryMods = GetEntryModifiers(entry)
     if not linkMods or linkMods.itemID ~= entryMods.itemID then
         return false
@@ -200,8 +200,12 @@ local function BuildSwapBagState(reservedBagSlots)
 end
 
 local function TakeEmptyBagSlot(bagState)
-    while #bagState.emptySlots > 0 do
-        local slotInfo = table.remove(bagState.emptySlots, 1)
+    bagState.emptyIndex = bagState.emptyIndex or 1
+
+    while bagState.emptyIndex <= #bagState.emptySlots do
+        local slotInfo = bagState.emptySlots[bagState.emptyIndex]
+        bagState.emptyIndex = bagState.emptyIndex + 1
+
         if not C_Container.GetContainerItemID(slotInfo.bag, slotInfo.slot) then
             bagState.reservedBagSlots[slotInfo.key] = true
             return slotInfo.bag, slotInfo.slot, slotInfo.key
@@ -235,6 +239,20 @@ end
 
 function Gear.NormalizeInvSlot(invSlot)
     return tonumber(invSlot) or invSlot
+end
+
+function Gear.GetEntryItemID(entry)
+    if type(entry) == "table" then
+        return entry.itemID
+    end
+
+    return entry
+end
+
+function Gear.GetEntryItemLink(entry)
+    if type(entry) == "table" then
+        return entry.itemLink
+    end
 end
 
 function Gear.GetGearSetEntry(gearSet, invSlot)
@@ -284,7 +302,9 @@ local function SlotSatisfiesTarget(invSlot, targetEntry)
         return not GetInventoryItemID("player", invSlot)
     end
 
-    return SlotEntryMatchesEquipped(invSlot, targetEntry)
+    local equippedLink = GetInventoryItemLink("player", invSlot)
+    local equippedID = GetInventoryItemID("player", invSlot)
+    return SlotEntryMatchesEquipped(invSlot, targetEntry, equippedLink, equippedID)
 end
 
 local function MergeGearSnapshot(snapshot, expectedGearSet)
@@ -297,7 +317,7 @@ local function MergeGearSnapshot(snapshot, expectedGearSet)
         local equippedID = GetInventoryItemID("player", invSlot)
         local equippedLink = GetInventoryItemLink("player", invSlot)
 
-        if equippedID and entry and SlotEntryMatchesEquipped(invSlot, entry) then
+        if equippedID and entry and SlotEntryMatchesEquipped(invSlot, entry, equippedLink, equippedID) then
             snapshot[invSlot] = Items.ToGearEntry({ itemID = equippedID, itemLink = equippedLink })
         elseif type(entry) == "table" and entry.itemLink then
             snapshot[invSlot] = Items.ToGearEntry({ itemID = entry.itemID, itemLink = entry.itemLink })
@@ -346,7 +366,7 @@ local function ShouldUnequipSlot(invSlot, gearSet, neededItems)
 
     local targetItem, targetBag, targetSlot, targetLink = ResolveGearEntry(gearEntry)
     if targetItem then
-        if ItemLinkMatchesEntry(currentLink, gearEntry) or SlotEntryMatchesEquipped(invSlot, gearEntry) then
+        if SlotEntryMatchesEquipped(invSlot, gearEntry, currentLink) then
             return false
         end
 
@@ -425,6 +445,11 @@ local function OrderSwapDiff(diff)
     end
     diff.unequip = filteredUnequip
 
+    local unequipEmbellished = {}
+    for _, invSlot in ipairs(diff.unequip) do
+        unequipEmbellished[invSlot] = Items.IsEmbellished(GetInventoryItemLink("player", invSlot)) and 1 or 0
+    end
+
     table.sort(diff.equip, function(a, b)
         local aEmbellished = IsEmbellishedGearEntry(a.entry) and 1 or 0
         local bEmbellished = IsEmbellishedGearEntry(b.entry) and 1 or 0
@@ -435,8 +460,8 @@ local function OrderSwapDiff(diff)
     end)
 
     table.sort(diff.unequip, function(a, b)
-        local aEmbellished = Items.IsEmbellished(GetInventoryItemLink("player", a)) and 1 or 0
-        local bEmbellished = Items.IsEmbellished(GetInventoryItemLink("player", b)) and 1 or 0
+        local aEmbellished = unequipEmbellished[a]
+        local bEmbellished = unequipEmbellished[b]
         if aEmbellished ~= bEmbellished then
             return aEmbellished < bEmbellished
         end
@@ -613,7 +638,7 @@ local function NeedsEquipForEntry(invSlot, gearEntry)
     end
 
     local equippedLink = GetInventoryItemLink("player", invSlot)
-    if SlotEntryMatchesEquipped(invSlot, gearEntry) then
+    if SlotEntryMatchesEquipped(invSlot, gearEntry, equippedLink) then
         return false
     end
 
@@ -646,7 +671,8 @@ local function EquipSlot(invSlot, gearEntry, usedLocations, bagState)
         return true
     end
 
-    if SlotEntryMatchesEquipped(invSlot, gearEntry) then
+    local equippedLink = GetInventoryItemLink("player", invSlot)
+    if SlotEntryMatchesEquipped(invSlot, gearEntry, equippedLink) then
         return true
     end
 
@@ -874,7 +900,7 @@ function Gear.DeleteSavedGear(configID, specID, notFoundMessage)
         return false
     end
 
-    local loadoutName = entry.loadoutName or Loadout.GetLoadoutName(configID)
+    local loadoutName = Loadout.ResolveLoadoutName(configID, entry.loadoutName)
     Print(string.format("Removed saved gear for %s.", loadoutName))
     RefreshUI()
     return true
@@ -945,7 +971,7 @@ function Gear.List(specID)
 
     for configID, entry in pairs(specData) do
         local marker = (configID == currentConfigID) and " (current)" or ""
-        local name = entry.loadoutName or Loadout.GetLoadoutName(configID)
+        local name = Loadout.ResolveLoadoutName(configID, entry.loadoutName)
         Print(string.format("- %s%s", name, marker))
     end
 end
@@ -1105,6 +1131,7 @@ function Gear.OnSpecChanged()
 
     C_Timer.After(0, function()
         Loadout.RememberActive(specID, Loadout.GetLoadoutConfigID(specID))
+        RefreshUI()
     end)
 end
 

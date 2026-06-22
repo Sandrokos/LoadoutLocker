@@ -12,7 +12,7 @@ local loadoutSelectionHooked
 function Loadout.GetSpecID()
     local specIndex = C_SpecializationInfo.GetSpecialization()
     if specIndex then
-        return select(1, C_SpecializationInfo.GetSpecializationInfo(specIndex))
+        return (C_SpecializationInfo.GetSpecializationInfo(specIndex))
     end
 end
 
@@ -36,6 +36,21 @@ function Loadout.GetLoadoutName(configID)
     return configInfo and configInfo.name or ("Loadout " .. tostring(configID))
 end
 
+function Loadout.ResolveLoadoutName(configID, cachedName)
+    if cachedName and cachedName ~= "" then
+        return cachedName
+    end
+
+    return Loadout.GetLoadoutName(configID)
+end
+
+function Loadout.SortByName(list)
+    table.sort(list, function(a, b)
+        return a.name < b.name
+    end)
+    return list
+end
+
 function Loadout.IsStarterBuild(configID)
     return configID == C.STARTER_BUILD_CONFIG_ID
 end
@@ -57,13 +72,15 @@ function Loadout.GetActive(specID)
         return nil
     end
 
+    local gear = DB:GetGearSet(specID, configID)
+
     return {
         specID = specID,
         configID = configID,
         name = Loadout.GetLoadoutName(configID),
         isStarter = Loadout.IsStarterBuild(configID),
-        hasSavedGear = DB:HasGearSet(specID, configID),
-        gear = DB:GetGearSet(specID, configID),
+        hasSavedGear = gear ~= nil,
+        gear = gear,
     }
 end
 
@@ -130,9 +147,7 @@ function Loadout.GetConfigList(specID)
         end
     end
 
-    table.sort(list, function(a, b)
-        return a.name < b.name
-    end)
+    Loadout.SortByName(list)
 
     return list
 end

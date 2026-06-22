@@ -5,7 +5,6 @@ LoadoutLocker.UI = UI
 
 local C = LoadoutLocker.Constants
 local Gear = LoadoutLocker.Gear
-local DB = LoadoutLocker.DB
 local Loadout = LoadoutLocker.Loadout
 local Items = LoadoutLocker.Items
 local Upgrades = LoadoutLocker.Upgrades
@@ -14,7 +13,6 @@ local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("TRAIT_CONFIG_LIST_UPDATED")
 eventFrame:RegisterEvent("TRAIT_CONFIG_UPDATED")
-eventFrame:RegisterEvent("ACTIVE_PLAYER_SPECIALIZATION_CHANGED")
 
 local saveButton
 local talentsFrame
@@ -233,11 +231,10 @@ local function RefreshSaveButton(checkInspecting)
 
     saveButton:Show()
 
-    local specID = Loadout.GetSpecID()
-    local configID = Loadout.GetLoadoutConfigID(specID)
-    local loadoutName = configID and Loadout.GetLoadoutName(configID)
-    local canSave = specID and configID and not Loadout.IsStarterBuild(configID)
-    local hasSaved = canSave and DB:HasGearSet(specID, configID)
+    local context = Loadout.GetActive()
+    local canSave = context and not context.isStarter
+    local loadoutName = context and context.name
+    local hasSaved = context and context.hasSavedGear
 
     if canSave then
         saveButton:Enable()
@@ -326,7 +323,7 @@ end
 eventFrame:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" and arg1 == C.TALENT_UI_ADDON then
         InitializeTalentUI()
-    elseif talentUIInitialized and (event == "TRAIT_CONFIG_LIST_UPDATED" or event == "TRAIT_CONFIG_UPDATED" or event == "ACTIVE_PLAYER_SPECIALIZATION_CHANGED") then
+    elseif talentUIInitialized and (event == "TRAIT_CONFIG_LIST_UPDATED" or event == "TRAIT_CONFIG_UPDATED") then
         ScheduleSaveButtonRefresh()
     end
 end)

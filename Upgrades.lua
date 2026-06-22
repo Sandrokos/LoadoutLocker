@@ -23,6 +23,18 @@ local ShowNextOffer
 local AcceptCurrentOffer
 local RespondToOffer
 
+local function ClearOfferState()
+    offerState.gearSet = nil
+    offerState.callback = nil
+    offerState.changed = false
+    offerState.declinedSlots = nil
+    offerState.offerQueue = nil
+    offerState.offerIndex = 1
+    offerState.specID = nil
+    offerState.configID = nil
+    currentOffer = nil
+end
+
 local TOOLTIP_FRAME = "LoadoutLockerUpgradeScanTooltip"
 
 local function IterGearSetSlots(gearSet)
@@ -182,18 +194,6 @@ function Upgrades.GetItemIcon(itemID, itemLink)
     return select(5, C_Item.GetItemInfo(itemID))
 end
 
-local function GetItemInfoCandidates(itemLink, itemID)
-    return Items.GetItemInfoCandidates(itemLink, itemID)
-end
-
-local function GetGemDisplayName(gemID)
-    if not gemID or gemID == 0 then
-        return nil
-    end
-
-    return Items.GetDisplayName(gemID)
-end
-
 local function GetEnchantDisplayName(enchantID, itemLink)
     if C_TooltipInfo and itemLink and C_TooltipInfo.GetHyperlink and Enum.TooltipDataLineType then
         local ok, info = pcall(C_TooltipInfo.GetHyperlink, itemLink)
@@ -263,7 +263,8 @@ local function FormatSocketGemDetails(profile)
 
         local gems = mods and mods.gems or {}
         for i = 1, socketCount do
-            local gemName = GetGemDisplayName(gems[i])
+            local gemID = gems[i]
+            local gemName = (gemID and gemID ~= 0) and Items.GetDisplayName(gemID)
             if gemName then
                 socketLines[#socketLines + 1] = string.format("Socket %d: %s", i, gemName)
             else
@@ -324,15 +325,6 @@ function Upgrades.FormatProfileDetails(profile)
     return table.concat(parts, "\n")
 end
 
-local function MatchStandardTrackFromText(text)
-    if not text then
-        return nil
-    end
-
-    local entry = MatchTrackEntry(text, true)
-    return entry and (entry[3] or entry[1])
-end
-
 local function ScanTooltipForUpgradeTrack(itemLink)
     if not itemLink then
         return nil
@@ -350,13 +342,14 @@ local function ScanTooltipForUpgradeTrack(itemLink)
             end
         end
 
-        return MatchStandardTrackFromText(text)
+        local entry = text and MatchTrackEntry(text, true)
+        return entry and (entry[3] or entry[1])
     end)
 end
 
 local function GetUpgradeTrack(itemLink, itemID, itemLocation)
     local upgradeInfo
-    local linkCandidates = GetItemInfoCandidates(itemLink, itemID)
+    local linkCandidates = Items.GetItemInfoCandidates(itemLink, itemID)
 
     local function trackFromUpgradeInfo(info)
         if info and info.trackString and info.trackString ~= "" then
@@ -416,10 +409,6 @@ local function GetUpgradeTrack(itemLink, itemID, itemLocation)
             end
         end
     end
-
-    if upgradeInfo and upgradeInfo.trackString and upgradeInfo.trackString ~= "" then
-        return upgradeInfo.trackString
-    end
 end
 
 local function ApplySavedEntryStats(profile, gearEntry)
@@ -460,11 +449,11 @@ local function GetStatValue(stats, keys)
 end
 
 local function GetItemStatsTable(itemLink, itemID)
-    if not C_Item or not C_Item.GetItemStats then
+    if not C_Item.GetItemStats then
         return nil
     end
 
-    for _, itemInfo in ipairs(GetItemInfoCandidates(itemLink, itemID)) do
+    for _, itemInfo in ipairs(Items.GetItemInfoCandidates(itemLink, itemID)) do
         local ok, stats = pcall(C_Item.GetItemStats, itemInfo)
         if ok and stats and next(stats) then
             return stats
@@ -718,22 +707,8 @@ local function IsBetterItem(candidate, reference)
     return IsBetterBonusProfile(candidate, reference)
 end
 
-local function GetSavedItemID(gearEntry)
-    if type(gearEntry) == "table" then
-        return gearEntry.itemID
-    end
-
-    return gearEntry
-end
-
-local function GetSavedItemLink(gearEntry)
-    if type(gearEntry) == "table" then
-        return gearEntry.itemLink
-    end
-end
-
 local function ProfileMatchesSavedEntry(itemLink, gearEntry)
-    local savedLink = GetSavedItemLink(gearEntry)
+    local savedLink = Gear.GetEntryItemLink(gearEntry)
     if savedLink and itemLink then
         return itemLink == savedLink
     end
@@ -748,7 +723,7 @@ local function ProfileMatchesSavedEntry(itemLink, gearEntry)
 end
 
 local function FindReferenceProfile(savedItemID, invSlot, savedItemLink, gearEntry, playerProfiles)
-    local savedLink = savedItemLink or GetSavedItemLink(gearEntry)
+    local savedLink = savedItemLink or Gear.GetEntryItemLink(gearEntry)
 
     if savedLink then
         if playerProfiles then
@@ -953,12 +928,12 @@ function Upgrades.FindOffers(gearSet, options)
             and not offeredSlots[normalizedSlot]
             and not ignored then
             local gearEntry = Gear.GetGearSetEntry(gearSet, invSlot)
-            local savedItemID = GetSavedItemID(gearEntry)
+            local savedItemID = Gear.GetEntryItemID(gearEntry)
             if savedItemID then
                 local referenceProfile = FindReferenceProfile(
                     savedItemID,
                     normalizedSlot,
-                    GetSavedItemLink(gearEntry),
+                    Gear.GetEntryItemLink(gearEntry),
                     gearEntry,
                     playerProfiles
                 )
@@ -1005,15 +980,7 @@ local function FinishOfferQueue()
         Gear.NormalizeGearSetKeys(gearSet)
     end
 
-    offerState.gearSet = nil
-    offerState.callback = nil
-    offerState.changed = false
-    offerState.declinedSlots = nil
-    offerState.offerQueue = nil
-    offerState.offerIndex = 1
-    offerState.specID = nil
-    offerState.configID = nil
-    currentOffer = nil
+    ClearOfferState()
 
     if callback then
         callback(gearSet, changed, declinedSlots)

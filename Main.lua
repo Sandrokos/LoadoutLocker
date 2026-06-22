@@ -13,8 +13,7 @@ local function ShowHelp()
     Print("/locker save - Save currently equipped gear to the active talent loadout")
     Print("/locker list - List saved gear sets for your current specialization")
     Print("/locker delete - Remove the saved gear set for the active talent loadout")
-    Print("/locker scan - Check bags for better versions of saved loadout items")
-    Print("/locker settings - Set tertiary stat priority for upgrade comparisons")
+    Print("/locker scan - Check bags for better versions of current loadout items")
     Print("/locker help - Show this help")
 end
 
@@ -33,8 +32,6 @@ local function HandleSlashCommand(msg)
         Gear.ScanForUpgrades()
     elseif msg == "delete" or msg == "clear" then
         Gear.Delete()
-    elseif msg == "settings" or msg == "priority" then
-        Menu.Show("priority")
     else
         Print("Unknown command. Type /locker help for options.")
     end
