@@ -4,17 +4,8 @@ local DB = {}
 LoadoutLocker.DB = DB
 
 LoadoutLockerDB = LoadoutLockerDB or {}
-GearSpecChangerDB = GearSpecChangerDB or {}
-
-local function MigrateSavedData()
-    if not next(LoadoutLockerDB) and next(GearSpecChangerDB) then
-        LoadoutLockerDB = GearSpecChangerDB
-        GearSpecChangerDB = nil
-    end
-end
 
 function DB:Initialize()
-    MigrateSavedData()
     LoadoutLockerDB = LoadoutLockerDB or {}
 end
 
@@ -37,10 +28,41 @@ function DB:HasGearSet(specID, configID)
     return self:GetGearSet(specID, configID) ~= nil
 end
 
-function DB:SetGearSet(specID, configID, gear, loadoutName)
+function DB:CopyGearSet(gear)
+    local copy = {}
+    for slot, entry in pairs(gear) do
+        local invSlot = tonumber(slot) or slot
+        if type(entry) == "table" then
+            local slotCopy = {
+                itemID = entry.itemID,
+                itemLink = entry.itemLink,
+            }
+            if entry.enchantID then
+                slotCopy.enchantID = entry.enchantID
+            end
+            if entry.gems then
+                slotCopy.gems = {
+                    entry.gems[1] or 0,
+                    entry.gems[2] or 0,
+                    entry.gems[3] or 0,
+                    entry.gems[4] or 0,
+                }
+            end
+            if entry.itemLevel then
+                slotCopy.itemLevel = entry.itemLevel
+            end
+            copy[invSlot] = slotCopy
+        else
+            copy[invSlot] = entry
+        end
+    end
+    return copy
+end
+
+function DB:CreateOrUpdateGearSet(specID, configID, gear, loadoutName)
     local specData = self:EnsureSpecTable(specID)
     specData[configID] = {
-        gear = gear,
+        gear = self:CopyGearSet(gear),
         loadoutName = loadoutName,
         savedAt = time(),
     }

@@ -11,6 +11,7 @@ local function ShowHelp()
     Print("/locker save - Save currently equipped gear to the active talent loadout")
     Print("/locker list - List saved gear sets for your current specialization")
     Print("/locker delete - Remove the saved gear set for the active talent loadout")
+    Print("/locker scan - Check bags for better versions of saved loadout items")
     Print("/locker help - Show this help")
 end
 
@@ -23,6 +24,8 @@ local function HandleSlashCommand(msg)
         Gear.Save()
     elseif msg == "list" then
         Gear.List()
+    elseif msg == "scan" then
+        Gear.ScanForUpgrades()
     elseif msg == "delete" or msg == "clear" then
         Gear.Delete()
     else
@@ -40,7 +43,6 @@ frame:RegisterEvent("PLAYER_LOGIN")
 frame:RegisterEvent("TRAIT_CONFIG_LIST_UPDATED")
 frame:RegisterEvent("TRAIT_CONFIG_UPDATED")
 frame:RegisterEvent("ACTIVE_PLAYER_SPECIALIZATION_CHANGED")
-frame:RegisterEvent("PLAYER_REGEN_ENABLED")
 
 frame:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" and arg1 == ADDON_NAME then
@@ -53,7 +55,5 @@ frame:SetScript("OnEvent", function(_, event, arg1)
         Gear.ScheduleLoadoutGearApply()
     elseif event == "ACTIVE_PLAYER_SPECIALIZATION_CHANGED" then
         Gear.OnSpecChanged()
-    elseif event == "PLAYER_REGEN_ENABLED" then
-        Gear.OnRegenEnabled()
     end
 end)

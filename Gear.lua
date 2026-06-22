@@ -13,6 +13,8 @@ end
 local STARTER_BUILD_CONFIG_ID = (Constants and Constants.TraitConsts and Constants.TraitConsts.STARTER_BUILD_TRAIT_CONFIG_ID) or -2
 local EQUIP_SLOT_DELAY = 0.15
 local LOADOUT_APPLY_DELAY = 0.25
+local SAVE_RETRY_DELAY = 0.15
+local MAX_SAVE_RETRIES = 8
 
 local EQUIP_SLOTS = {
     INVSLOT_HEAD,
@@ -32,7 +34,6 @@ local EQUIP_SLOTS = {
     INVSLOT_BACK,
     INVSLOT_MAINHAND,
     INVSLOT_OFFHAND,
-    INVSLOT_TABARD,
 }
 
 local BAGS = {
@@ -115,21 +116,207 @@ local function HookLoadoutSelection()
     end)
 end
 
-local function NormalizeGearSet(gearSet)
-    if not gearSet then
+local function ParseItemLinkModifiers(itemLink)
+    if not itemLink then
         return nil
     end
 
-    local normalized = {}
-    for slot, data in pairs(gearSet) do
-        local invSlot = tonumber(slot)
-        local itemID = type(data) == "table" and data.itemID or tonumber(data)
-        if invSlot and itemID then
-            normalized[invSlot] = itemID
+    local itemString = string.match(itemLink, "item[%-?%d:]+")
+    if not itemString then
+        return nil
+    end
+
+    local parts = {}
+    for part in string.gmatch(itemString .. ":", "([^:]*):") do
+        parts[#parts + 1] = part
+    end
+
+    local function num(index)
+        return tonumber(parts[index]) or 0
+    end
+
+    return {
+        itemID = num(2),
+        enchantID = num(3),
+        gems = { num(4), num(5), num(6), num(7) },
+    }
+end
+
+local function CopyGemsTable(gems)
+    if not gems then
+        return { 0, 0, 0, 0 }
+    end
+
+    return { gems[1] or 0, gems[2] or 0, gems[3] or 0, gems[4] or 0 }
+end
+
+local function GemsMatch(gemsA, gemsB)
+    gemsA = gemsA or { 0, 0, 0, 0 }
+    gemsB = gemsB or { 0, 0, 0, 0 }
+
+    for i = 1, 4 do
+        if (gemsA[i] or 0) ~= (gemsB[i] or 0) then
+            return false
         end
     end
 
-    return normalized
+    return true
+end
+
+local function ModifiersMatch(modsA, modsB)
+    if not modsA or not modsB then
+        return false
+    end
+
+    if modsA.itemID ~= modsB.itemID then
+        return false
+    end
+
+    if (modsA.enchantID or 0) ~= (modsB.enchantID or 0) then
+        return false
+    end
+
+    return GemsMatch(modsA.gems, modsB.gems)
+end
+
+local function GetEntryModifiers(entry)
+    if type(entry) ~= "table" then
+        return {
+            itemID = entry,
+            enchantID = 0,
+            gems = { 0, 0, 0, 0 },
+        }
+    end
+
+    if entry.enchantID or entry.gems then
+        return {
+            itemID = entry.itemID,
+            enchantID = entry.enchantID or 0,
+            gems = CopyGemsTable(entry.gems),
+        }
+    end
+
+    local mods = ParseItemLinkModifiers(entry.itemLink)
+    if mods then
+        return mods
+    end
+
+    return {
+        itemID = entry.itemID,
+        enchantID = 0,
+        gems = { 0, 0, 0, 0 },
+    }
+end
+
+local function EntryRequiresModifierMatch(entry)
+    if type(entry) ~= "table" then
+        return false
+    end
+
+    if entry.enchantID or entry.gems then
+        return true
+    end
+
+    return entry.itemLink ~= nil
+end
+
+local function ItemLinksMatch(linkA, linkB)
+    return linkA and linkB and linkA == linkB
+end
+
+local function GetLinkItemLevel(itemLink)
+    if not itemLink then
+        return 0
+    end
+
+    if C_Item.GetDetailedItemLevelInfo then
+        local level = C_Item.GetDetailedItemLevelInfo(itemLink)
+        if level and level > 0 then
+            return level
+        end
+    end
+
+    local _, _, _, level = C_Item.GetItemInfo(itemLink)
+    return level or 0
+end
+
+local function GetSavedItemLevel(entry)
+    if type(entry) ~= "table" then
+        return 0
+    end
+
+    if entry.itemLevel and entry.itemLevel > 0 then
+        return entry.itemLevel
+    end
+
+    return GetLinkItemLevel(entry.itemLink)
+end
+
+local function ItemLinkMatchesEntry(itemLink, entry)
+    if not itemLink or not entry then
+        return false
+    end
+
+    if type(entry) == "table" and ItemLinksMatch(itemLink, entry.itemLink) then
+        return true
+    end
+
+    local linkMods = ParseItemLinkModifiers(itemLink)
+    if not linkMods then
+        return false
+    end
+
+    local entryMods = GetEntryModifiers(entry)
+    if linkMods.itemID ~= entryMods.itemID then
+        return false
+    end
+
+    if not ModifiersMatch(linkMods, entryMods) then
+        return false
+    end
+
+    local savedLevel = GetSavedItemLevel(entry)
+    if savedLevel > 0 then
+        local candidateLevel = GetLinkItemLevel(itemLink)
+        if candidateLevel > 0 and candidateLevel ~= savedLevel then
+            return false
+        end
+    end
+
+    return true
+end
+
+local function CreateGearEntry(itemID, itemLink)
+    if itemLink then
+        local entry = {
+            itemID = itemID,
+            itemLink = itemLink,
+        }
+        local mods = ParseItemLinkModifiers(itemLink)
+        if mods then
+            entry.enchantID = mods.enchantID
+            entry.gems = CopyGemsTable(mods.gems)
+        end
+        entry.itemLevel = GetLinkItemLevel(itemLink)
+        return entry
+    end
+
+    return itemID
+end
+
+function Gear.ParseItemLinkModifiers(itemLink)
+    return ParseItemLinkModifiers(itemLink)
+end
+
+function Gear.CreateGearEntryFromLink(itemID, itemLink, bag, slot)
+    local entry = CreateGearEntry(itemID, itemLink)
+    if type(entry) == "table" then
+        if bag and slot then
+            entry.bag = bag
+            entry.slot = slot
+        end
+    end
+    return entry
 end
 
 local function SnapshotEquippedGear()
@@ -138,7 +325,7 @@ local function SnapshotEquippedGear()
     for _, slot in ipairs(EQUIP_SLOTS) do
         local itemID = GetInventoryItemID("player", slot)
         if itemID then
-            gear[slot] = itemID
+            gear[slot] = CreateGearEntry(itemID, GetInventoryItemLink("player", slot))
         end
     end
 
@@ -165,10 +352,151 @@ local function FindEmptyBagSlot(reservedBagSlots)
     end
 end
 
+local function NormalizeInvSlot(invSlot)
+    return tonumber(invSlot) or invSlot
+end
+
+local function GetGearSetEntry(gearSet, invSlot)
+    if not gearSet then
+        return nil
+    end
+
+    invSlot = NormalizeInvSlot(invSlot)
+    return gearSet[invSlot] or gearSet[tostring(invSlot)]
+end
+
+local function SetGearSetEntry(gearSet, invSlot, entry)
+    invSlot = NormalizeInvSlot(invSlot)
+    gearSet[invSlot] = entry
+    gearSet[tostring(invSlot)] = nil
+end
+
+function Gear.NormalizeGearSetKeys(gearSet)
+    if not gearSet then
+        return gearSet
+    end
+
+    local merged = {}
+    for slot, entry in pairs(gearSet) do
+        local invSlot = NormalizeInvSlot(slot)
+        merged[invSlot] = entry
+    end
+
+    for slot in pairs(gearSet) do
+        gearSet[slot] = nil
+    end
+
+    for invSlot, entry in pairs(merged) do
+        gearSet[invSlot] = entry
+    end
+
+    return gearSet
+end
+
+function Gear.SetGearSetEntry(gearSet, invSlot, entry)
+    SetGearSetEntry(gearSet, invSlot, entry)
+end
+
+local function ResolveGearEntry(entry)
+    if type(entry) == "table" then
+        return entry.itemID, entry.bag, entry.slot, entry.itemLink, entry.enchantID, CopyGemsTable(entry.gems)
+    end
+
+    return entry, nil, nil, nil, nil, nil
+end
+
+local swapDeclinedUpgradeSlots
+
+local function IsUpgradeDeclinedForSlot(invSlot)
+    if not swapDeclinedUpgradeSlots then
+        return false
+    end
+
+    local normalizedSlot = tonumber(invSlot) or invSlot
+    return swapDeclinedUpgradeSlots[normalizedSlot]
+        or swapDeclinedUpgradeSlots[tostring(normalizedSlot)]
+        or false
+end
+
+local function ShouldKeepEquippedUpgrade(invSlot, itemLink, gearEntry)
+    if not itemLink or not gearEntry then
+        return false
+    end
+
+    if IsUpgradeDeclinedForSlot(invSlot) then
+        return false
+    end
+
+    return LoadoutLocker.Upgrades.IsLinkBetterThanSavedEntry(itemLink, gearEntry)
+end
+
+local function MergeGearSnapshot(snapshot, expectedGearSet)
+    if not expectedGearSet then
+        return snapshot
+    end
+
+    for invSlot, entry in pairs(expectedGearSet) do
+        invSlot = NormalizeInvSlot(invSlot)
+        local equippedID = GetInventoryItemID("player", invSlot)
+        local equippedLink = GetInventoryItemLink("player", invSlot)
+
+        if equippedID and entry and ItemLinkMatchesEntry(equippedLink, entry) then
+            snapshot[invSlot] = CreateGearEntry(equippedID, equippedLink)
+        elseif equippedLink and entry and ShouldKeepEquippedUpgrade(invSlot, equippedLink, entry) then
+            snapshot[invSlot] = CreateGearEntry(equippedID, equippedLink)
+        elseif type(entry) == "table" and entry.itemLink then
+            snapshot[invSlot] = CreateGearEntry(entry.itemID, entry.itemLink)
+        elseif entry then
+            snapshot[invSlot] = entry
+        end
+    end
+
+    return snapshot
+end
+
+local function ExpectedGearReady(expectedGearSet)
+    Gear.NormalizeGearSetKeys(expectedGearSet)
+
+    for _, invSlot in ipairs(EQUIP_SLOTS) do
+        local entry = GetGearSetEntry(expectedGearSet, invSlot)
+        if entry then
+            local equippedLink = GetInventoryItemLink("player", invSlot)
+            if not ItemLinkMatchesEntry(equippedLink, entry)
+                and not ShouldKeepEquippedUpgrade(invSlot, equippedLink, entry) then
+                return false
+            end
+        end
+    end
+
+    return true
+end
+
+local function SaveEquippedGearSet(specID, configID, expectedGearSet)
+    local snapshot = MergeGearSnapshot(SnapshotEquippedGear(), expectedGearSet)
+    DB:CreateOrUpdateGearSet(specID, configID, snapshot, Talents.GetLoadoutName(configID))
+    RefreshUI()
+end
+
+local function ScheduleSaveEquippedGearSet(specID, configID, expectedGearSet, attemptsLeft)
+    attemptsLeft = attemptsLeft or MAX_SAVE_RETRIES
+
+    C_Timer.After(SAVE_RETRY_DELAY, function()
+        if expectedGearSet and not ExpectedGearReady(expectedGearSet) and attemptsLeft > 1 then
+            ScheduleSaveEquippedGearSet(specID, configID, expectedGearSet, attemptsLeft - 1)
+            return
+        end
+
+        SaveEquippedGearSet(specID, configID, expectedGearSet)
+    end)
+end
+
 local function BuildNeededItems(gearSet)
     local neededItems = {}
-    for _, itemID in pairs(gearSet) do
-        neededItems[itemID] = true
+    for _, entry in pairs(gearSet) do
+        local itemID = ResolveGearEntry(entry)
+        if itemID then
+            neededItems[itemID] = true
+        end
     end
     return neededItems
 end
@@ -179,9 +507,28 @@ local function ShouldUnequipSlot(invSlot, gearSet, neededItems)
         return false
     end
 
-    local targetItem = gearSet[invSlot]
-    if targetItem and currentItem == targetItem then
+    local gearEntry = GetGearSetEntry(gearSet, invSlot)
+    local currentLink = GetInventoryItemLink("player", invSlot)
+
+    if gearEntry and ShouldKeepEquippedUpgrade(invSlot, currentLink, gearEntry) then
         return false
+    end
+
+    local targetItem, targetBag, targetSlot, targetLink = ResolveGearEntry(gearEntry)
+    if targetItem then
+        if ItemLinkMatchesEntry(currentLink, gearEntry) then
+            return false
+        end
+
+        if not EntryRequiresModifierMatch(gearEntry) and not targetLink and currentItem == targetItem then
+            if targetBag and targetSlot then
+                local preferredLink = C_Container.GetContainerItemLink(targetBag, targetSlot)
+                if currentLink and preferredLink and currentLink ~= preferredLink then
+                    return true
+                end
+            end
+            return false
+        end
     end
 
     if not targetItem and neededItems[currentItem] then
@@ -211,7 +558,86 @@ local function UnequipToBag(invSlot, reservedBagSlots)
     return true
 end
 
-local function FindItemInBags(itemID, usedLocations)
+local function FindItemInBagsByLink(itemLink, usedLocations, gearEntry)
+    if not itemLink and not gearEntry then
+        return
+    end
+
+    for _, bag in ipairs(BAGS) do
+        local numSlots = C_Container.GetContainerNumSlots(bag)
+        for slot = 1, numSlots do
+            local locationKey = "bag:" .. bag .. ":" .. slot
+            if not usedLocations[locationKey] then
+                local link = C_Container.GetContainerItemLink(bag, slot)
+                if link then
+                    if gearEntry and ItemLinkMatchesEntry(link, gearEntry) then
+                        return "bag", bag, slot, locationKey
+                    end
+                    if itemLink and ItemLinksMatch(link, itemLink) then
+                        return "bag", bag, slot, locationKey
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function FindItemInBagsByModifiers(entry, usedLocations)
+    local modifiers = GetEntryModifiers(entry)
+    if not modifiers.itemID then
+        return
+    end
+
+    local savedLevel = GetSavedItemLevel(entry)
+    local bestSource, bestBag, bestSlot, bestKey, bestDistance
+
+    for _, bag in ipairs(BAGS) do
+        local numSlots = C_Container.GetContainerNumSlots(bag)
+        for slot = 1, numSlots do
+            local locationKey = "bag:" .. bag .. ":" .. slot
+            if not usedLocations[locationKey] then
+                local link = C_Container.GetContainerItemLink(bag, slot)
+                if type(entry) == "table" and ItemLinksMatch(link, entry.itemLink) then
+                    return "bag", bag, slot, locationKey
+                end
+                if ItemLinkMatchesEntry(link, entry) then
+                    local distance = 0
+                    if savedLevel > 0 then
+                        local level = GetLinkItemLevel(link)
+                        distance = level > 0 and math.abs(level - savedLevel) or math.huge
+                    end
+                    if not bestSource or distance < bestDistance then
+                        bestSource = "bag"
+                        bestBag = bag
+                        bestSlot = slot
+                        bestKey = locationKey
+                        bestDistance = distance
+                    end
+                end
+            end
+        end
+    end
+
+    return bestSource, bestBag, bestSlot, bestKey
+end
+
+local function FindItemInBags(itemID, itemLink, usedLocations, gearEntry)
+    local sourceType, bag, slot, locationKey = FindItemInBagsByLink(itemLink, usedLocations, gearEntry)
+    if sourceType then
+        return sourceType, bag, slot, locationKey
+    end
+
+    if gearEntry then
+        sourceType, bag, slot, locationKey = FindItemInBagsByModifiers(gearEntry, usedLocations)
+        if sourceType then
+            return sourceType, bag, slot, locationKey
+        end
+    end
+
+    if gearEntry and EntryRequiresModifierMatch(gearEntry) then
+        return
+    end
+
     for _, bag in ipairs(BAGS) do
         local numSlots = C_Container.GetContainerNumSlots(bag)
         for slot = 1, numSlots do
@@ -223,8 +649,8 @@ local function FindItemInBags(itemID, usedLocations)
     end
 end
 
-local function FindItemOnPlayer(itemID, targetSlot, usedLocations)
-    local sourceType, bag, slot, locationKey = FindItemInBags(itemID, usedLocations)
+local function FindItemOnPlayer(itemID, itemLink, targetSlot, usedLocations, gearEntry)
+    local sourceType, bag, slot, locationKey = FindItemInBags(itemID, itemLink, usedLocations, gearEntry)
     if sourceType then
         return sourceType, bag, slot, locationKey
     end
@@ -232,23 +658,101 @@ local function FindItemOnPlayer(itemID, targetSlot, usedLocations)
     for _, equippedSlot in ipairs(EQUIP_SLOTS) do
         if equippedSlot ~= targetSlot then
             local locationKey = "equipped:" .. equippedSlot
-            if not usedLocations[locationKey] and GetInventoryItemID("player", equippedSlot) == itemID then
-                return "equipped", equippedSlot, nil, locationKey
+            if not usedLocations[locationKey] then
+                local equippedLink = GetInventoryItemLink("player", equippedSlot)
+                if gearEntry and ItemLinkMatchesEntry(equippedLink, gearEntry) then
+                    return "equipped", equippedSlot, nil, locationKey
+                end
+                if itemLink and ItemLinksMatch(equippedLink, itemLink) then
+                    return "equipped", equippedSlot, nil, locationKey
+                end
+                if not gearEntry or not EntryRequiresModifierMatch(gearEntry) then
+                    if not itemLink and GetInventoryItemID("player", equippedSlot) == itemID then
+                        return "equipped", equippedSlot, nil, locationKey
+                    end
+                end
             end
         end
     end
 end
 
-local function EquipSlot(invSlot, itemID, usedLocations)
+local function TryEquipFromBag(invSlot, bag, slot, usedLocations)
+    local locationKey = "bag:" .. bag .. ":" .. slot
+    if usedLocations[locationKey] or not C_Container.GetContainerItemID(bag, slot) then
+        return false
+    end
+
+    ClearCursor()
+    C_Container.PickupContainerItem(bag, slot)
+    PickupInventoryItem(invSlot)
+    ClearCursor()
+    usedLocations[locationKey] = true
+    return true
+end
+
+local function NeedsEquipForEntry(invSlot, gearEntry)
+    local itemID = ResolveGearEntry(gearEntry)
+    if not itemID then
+        return false
+    end
+
+    local equippedLink = GetInventoryItemLink("player", invSlot)
+    if ShouldKeepEquippedUpgrade(invSlot, equippedLink, gearEntry) then
+        return false
+    end
+
+    if ItemLinkMatchesEntry(equippedLink, gearEntry) then
+        return false
+    end
+
+    if not EntryRequiresModifierMatch(gearEntry) then
+        local _, preferredBag, preferredSlot, itemLink = ResolveGearEntry(gearEntry)
+        if GetInventoryItemID("player", invSlot) ~= itemID then
+            return true
+        end
+
+        if preferredBag and preferredSlot then
+            local preferredLink = C_Container.GetContainerItemLink(preferredBag, preferredSlot)
+            if equippedLink and preferredLink and equippedLink ~= preferredLink then
+                return true
+            end
+        end
+
+        if itemLink and equippedLink and equippedLink ~= itemLink then
+            return true
+        end
+    end
+
+    return true
+end
+
+local function EquipSlot(invSlot, gearEntry, usedLocations)
+    local itemID, preferredBag, preferredSlot, itemLink = ResolveGearEntry(gearEntry)
     if not itemID then
         return true
     end
 
-    if GetInventoryItemID("player", invSlot) == itemID then
+    local equippedLink = GetInventoryItemLink("player", invSlot)
+    if ItemLinkMatchesEntry(equippedLink, gearEntry) then
         return true
     end
 
-    local sourceType, arg1, arg2, locationKey = FindItemOnPlayer(itemID, invSlot, usedLocations)
+    if ShouldKeepEquippedUpgrade(invSlot, equippedLink, gearEntry) then
+        return true
+    end
+
+    if preferredBag and preferredSlot then
+        local preferredItemID = C_Container.GetContainerItemID(preferredBag, preferredSlot)
+        if preferredItemID then
+            local preferredLink = C_Container.GetContainerItemLink(preferredBag, preferredSlot)
+            if ItemLinkMatchesEntry(preferredLink, gearEntry)
+                and TryEquipFromBag(invSlot, preferredBag, preferredSlot, usedLocations) then
+                return true
+            end
+        end
+    end
+
+    local sourceType, arg1, arg2, locationKey = FindItemOnPlayer(itemID, itemLink, invSlot, usedLocations, gearEntry)
     if not sourceType then
         Print("Missing item: " .. GetItemDisplayName(itemID))
         return false
@@ -269,15 +773,18 @@ local function EquipSlot(invSlot, itemID, usedLocations)
     return true
 end
 
-local function RunGearSwap(gearSet, onComplete)
+local function RunGearSwap(gearSet, onComplete, declinedUpgradeSlots)
     if equipQueueRunning then
         return
     end
 
-    gearSet = NormalizeGearSet(gearSet)
     if not gearSet or not next(gearSet) then
         return
     end
+
+    Gear.NormalizeGearSetKeys(gearSet)
+
+    swapDeclinedUpgradeSlots = declinedUpgradeSlots
 
     equipQueueRunning = true
     local neededItems = BuildNeededItems(gearSet)
@@ -301,8 +808,7 @@ local function RunGearSwap(gearSet, onComplete)
 
                 if ShouldUnequipSlot(invSlot, gearSet, neededItems) then
                     if not UnequipToBag(invSlot, reservedBagSlots) then
-                        equipQueueRunning = false
-                        return
+                        Print("Could not unequip slot " .. tostring(invSlot) .. "; continuing.")
                     end
                     C_Timer.After(EQUIP_SLOT_DELAY, Step)
                     return
@@ -319,25 +825,27 @@ local function RunGearSwap(gearSet, onComplete)
             local invSlot = EQUIP_SLOTS[index]
             index = index + 1
 
-            local itemID = gearSet[invSlot]
-            if itemID and GetInventoryItemID("player", invSlot) ~= itemID then
-                EquipSlot(invSlot, itemID, usedLocations)
+            local gearEntry = GetGearSetEntry(gearSet, invSlot)
+            if gearEntry and NeedsEquipForEntry(invSlot, gearEntry) then
+                if not EquipSlot(invSlot, gearEntry, usedLocations) then
+                    Print("Could not equip slot " .. tostring(invSlot) .. "; continuing.")
+                end
                 C_Timer.After(EQUIP_SLOT_DELAY, Step)
                 return
             end
         end
 
         equipQueueRunning = false
+        swapDeclinedUpgradeSlots = nil
         if onComplete then
-            onComplete()
+            C_Timer.After(EQUIP_SLOT_DELAY, onComplete)
         end
     end
 
     Step()
 end
 
-local function ApplyGearSwap(gearSet, onComplete)
-    gearSet = NormalizeGearSet(gearSet)
+local function ApplyGearSwap(gearSet, onComplete, declinedUpgradeSlots)
     if not gearSet or not next(gearSet) then
         return
     end
@@ -348,7 +856,16 @@ local function ApplyGearSwap(gearSet, onComplete)
         return
     end
 
-    RunGearSwap(gearSet, onComplete)
+    RunGearSwap(gearSet, onComplete, declinedUpgradeSlots)
+end
+
+function Gear.EquipGearSetAndSave(specID, configID, gearSet, onComplete)
+    ApplyGearSwap(gearSet, function()
+        ScheduleSaveEquippedGearSet(specID, configID, gearSet)
+        if onComplete then
+            onComplete()
+        end
+    end)
 end
 
 function Gear.Save(specID, configID)
@@ -370,7 +887,7 @@ function Gear.Save(specID, configID)
     end
 
     local loadoutName = Talents.GetLoadoutName(configID)
-    DB:SetGearSet(specID, configID, SnapshotEquippedGear(), loadoutName)
+    DB:CreateOrUpdateGearSet(specID, configID, SnapshotEquippedGear(), loadoutName)
     Print(string.format("Saved gear for %s.", loadoutName))
     RefreshUI()
     return true
@@ -436,6 +953,10 @@ function Gear.ScheduleLoadoutGearApply()
 end
 
 function Gear.ApplyGearForLoadoutChange()
+    if LoadoutLocker.Upgrades.IsPromptActive() then
+        return
+    end
+
     if not pendingLoadoutSwitch then
         return
     end
@@ -451,16 +972,68 @@ function Gear.ApplyGearForLoadoutChange()
         return
     end
 
-    local gearSet = NormalizeGearSet(DB:GetGearSet(specID, configID))
-    if not gearSet then
+    local storedGear = DB:GetGearSet(specID, configID)
+    if not storedGear then
         return
     end
 
+    local gearSet = DB:CopyGearSet(storedGear)
+
     local loadoutName = Talents.GetLoadoutName(configID)
     Print(string.format("Talent loadout changed to %s. Applying saved gear...", loadoutName))
-    ApplyGearSwap(gearSet, function()
-        Print("Applied saved gear set.")
-    end)
+
+    LoadoutLocker.Upgrades.PromptForBetterItems(gearSet, {
+        specID = specID,
+        configID = configID,
+        onComplete = function(updatedGearSet, changed, declinedSlots)
+            ApplyGearSwap(updatedGearSet, function()
+                if changed then
+                    ScheduleSaveEquippedGearSet(specID, configID, updatedGearSet)
+                    Print("Applied and saved upgraded gear set.")
+                else
+                    Print("Applied saved gear set.")
+                end
+            end, declinedSlots)
+        end,
+    })
+end
+
+function Gear.ScanForUpgrades()
+    local specID = Talents.GetSpecID()
+    local configID = specID and Talents.GetLoadoutConfigID(specID)
+    if not specID or not configID then
+        Print("No talent loadout selected.")
+        return
+    end
+
+    local storedGear = DB:GetGearSet(specID, configID)
+    if not storedGear then
+        Print("No saved gear set for the current talent loadout.")
+        return
+    end
+
+    local gearSet = DB:CopyGearSet(storedGear)
+
+    if #LoadoutLocker.Upgrades.FindOffers(gearSet) == 0 then
+        Print("No better items found in your bags.")
+        return
+    end
+
+    LoadoutLocker.Upgrades.PromptForBetterItems(gearSet, {
+        specID = specID,
+        configID = configID,
+        onComplete = function(updatedGearSet, changed, declinedSlots)
+            if not changed then
+                Print("No upgrades selected.")
+                return
+            end
+
+            ApplyGearSwap(updatedGearSet, function()
+                ScheduleSaveEquippedGearSet(specID, configID, updatedGearSet)
+                Print("Applied and saved upgraded gear set.")
+            end, declinedSlots)
+        end,
+    })
 end
 
 function Gear.OnSpecChanged()
@@ -481,18 +1054,6 @@ function Gear.RecordCurrentLoadout()
         RememberActiveLoadout(specID, configID)
         return true
     end
-end
-
-function Gear.OnRegenEnabled()
-    if not deferredGearSwap or InCombatLockdown() then
-        return
-    end
-
-    local gearSet = deferredGearSwap
-    deferredGearSwap = nil
-    ApplyGearSwap(gearSet, function()
-        Print("Applied saved gear set.")
-    end)
 end
 
 HookLoadoutSelection()

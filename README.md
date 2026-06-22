@@ -11,7 +11,7 @@ Built for **World of Warcraft: Midnight** (Interface `120007`).
 - **Smart swapping** — two-phase unequip/equip handles embellished items and slot conflicts
 - **Combat-safe** — gear swaps queue until combat ends
 - **Talent UI button** — Save Gear button below the loadout dropdown on the talent panel
-- **Character-specific saves** — data stored per character, per specialization
+- **Upgrade scan** — when applying a loadout, prompts if a same-name bag item is better (track, ilvl, or tertiary stats)
 
 ## Installation
 
@@ -39,6 +39,16 @@ Select a different talent loadout as usual. If a saved gear set exists for that 
 
 Loadouts with no saved gear are left unchanged.
 
+### Upgrade scan
+
+When you switch loadouts (or run `/locker scan`), LoadoutLocker checks your bags for items with the **same name** as saved set pieces. You are prompted to use a better item when:
+
+1. **Higher upgrade track** — Myth > Hero > Champion > Veteran > Adventurer
+2. **Same track, higher item level**
+3. **Same track and item level** — compares the full bonus profile: socket(s) plus tertiaries together, ranked Socket > Avoidance > Leech > Speed
+
+Accepting an upgrade updates the saved loadout gear and equips it.
+
 ### Slash commands
 
 | Command | Description |
@@ -46,6 +56,7 @@ Loadouts with no saved gear are left unchanged.
 | `/locker save` | Save currently equipped gear to the active talent loadout |
 | `/locker list` | List saved gear sets for your current specialization |
 | `/locker delete` | Remove the saved gear set for the active talent loadout |
+| `/locker scan` | Check bags for better versions of saved loadout items |
 | `/locker help` | Show command help |
 
 `/loadoutlocker` is an alias for `/locker`.
@@ -57,3 +68,31 @@ Loadouts with no saved gear are left unchanged.
 - Missing items are skipped with a chat message; other slots still swap
 - Gear swaps do not run in combat (queued until combat ends)
 
+## Project layout
+
+```
+LoadoutLocker/
+├── LoadoutLocker.toc   # Addon manifest
+├── db.lua              # SavedVariables persistence
+├── Upgrades.lua        # Bag scan and upgrade prompts
+├── Gear.lua            # Talents, save/delete/list, equip logic
+├── Main.lua            # Events and slash commands
+└── UI.lua              # Talent panel Save Gear button
+```
+
+Load order: `db.lua` → `Upgrades.lua` → `Gear.lua` → `Main.lua` → `UI.lua`
+
+## Data
+
+Saved data uses `LoadoutLockerDB` (per character). Gear is stored as item IDs keyed by inventory slot.
+
+## Development notes
+
+Shared addon dev references live outside this repo:
+
+- `../docs/wow-midnight-talent-taint.md` — talent UI taint patterns (Midnight)
+- `../docs/wow-addon-api-notes.md` — API deprecations (`C_SpecializationInfo`, etc.)
+
+## License
+
+Personal project by tidus.
