@@ -61,10 +61,11 @@ local function CreateItemPanel(parent, name)
 
     panel.details = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     panel.details:SetPoint("TOP", panel.name, "BOTTOM", 0, -6)
-    panel.details:SetWidth(175)
+    panel.details:SetWidth(185)
     panel.details:SetWordWrap(true)
     panel.details:SetJustifyH("CENTER")
     panel.details:SetNonSpaceWrap(false)
+    panel.details:SetSpacing(2)
 
     return panel
 end
@@ -108,7 +109,7 @@ local function LayoutUpgradeFrame(frame)
     frame.arrow:SetPoint("TOP", frame, "TOP", 0, arrowOffset)
 
     local frameHeight = math.abs(panelTop) + panelHeight + 58
-    frame:SetHeight(math.max(320, math.min(frameHeight, 520)))
+    frame:SetHeight(math.max(360, math.min(frameHeight, 560)))
 end
 
 local function EnsureUpgradeFrame()

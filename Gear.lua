@@ -972,15 +972,9 @@ local function PromptAndApplyGear(specID, configID, gearSet, options)
     Gear.NormalizeGearSetKeys(gearSet)
 
     local diff = Gear.BuildGearDiff(gearSet)
-    if diff.empty then
-        Print(options.alreadyAppliedMessage or "Already wearing saved gear for this loadout.")
-        return
-    end
-
-    local slotFilter = DiffSlotFilter(diff)
 
     if options.requireOffers then
-        local offers = LoadoutLocker.Upgrades.FindOffers(gearSet, { slots = slotFilter })
+        local offers = LoadoutLocker.Upgrades.FindOffers(gearSet)
         if #offers == 0 then
             Print(options.noOffersMessage or "No better items found in your bags.")
             return
@@ -988,11 +982,18 @@ local function PromptAndApplyGear(specID, configID, gearSet, options)
         options.offers = offers
     end
 
+    if diff.empty then
+        local offers = options.offers or LoadoutLocker.Upgrades.FindOffers(gearSet)
+        if #offers == 0 then
+            Print(options.alreadyAppliedMessage or "Already wearing saved gear for this loadout.")
+            return
+        end
+    end
+
     LoadoutLocker.Upgrades.PromptForBetterItems(gearSet, {
         specID = specID,
         configID = configID,
         offers = options.offers,
-        slotFilter = slotFilter,
         onComplete = function(updatedGearSet, changed, declinedSlots)
             if options.requireChange and not changed then
                 Print(options.noChangeMessage or "No upgrades selected.")

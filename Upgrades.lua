@@ -187,28 +187,6 @@ function Upgrades.GetItemDisplayName(itemID)
     return GetItemName(itemID)
 end
 
-function Upgrades.FormatProfileDetails(profile)
-    local parts = {
-        string.format("%s | ilvl %d", GetTrackLabel(profile.trackString), profile.itemLevel),
-    }
-
-    if profile.sockets > 0 then
-        parts[#parts + 1] = profile.sockets == 1 and "1 socket" or (profile.sockets .. " sockets")
-    end
-
-    for _, field in ipairs(C.TERTIARY_PRIORITY) do
-        if field ~= "sockets" and profile[field] > 0 then
-            parts[#parts + 1] = C.TERTIARY_LABELS[field]
-        end
-    end
-
-    if #parts == 1 then
-        parts[#parts + 1] = "No bonus stats"
-    end
-
-    return table.concat(parts, ", ")
-end
-
 function Upgrades.GetItemIcon(itemID, itemLink)
     if itemLink and C_Item.GetItemIconByID then
         return C_Item.GetItemIconByID(itemID)
@@ -267,6 +245,153 @@ local function ForEachTooltipLine(callback)
             end
         end
     end
+end
+
+local function GetGemDisplayName(gemID)
+    if not gemID or gemID == 0 then
+        return nil
+    end
+
+    local name = C_Item.GetItemNameByID and C_Item.GetItemNameByID(gemID)
+    if not name then
+        name = GetItemInfo(gemID)
+    end
+
+    return name or ("Gem " .. tostring(gemID))
+end
+
+local function GetEnchantDisplayName(enchantID, itemLink)
+    if C_TooltipInfo and itemLink and C_TooltipInfo.GetHyperlink and Enum.TooltipDataLineType then
+        local ok, info = pcall(C_TooltipInfo.GetHyperlink, itemLink)
+        if ok and info and info.lines then
+            for _, line in ipairs(info.lines) do
+                if line.type == Enum.TooltipDataLineType.ItemEnchantmentPermanent and line.leftText then
+                    return line.leftText
+                end
+            end
+        end
+    end
+
+    if enchantID and enchantID > 0 then
+        if C_Spell and C_Spell.GetSpellInfo then
+            local spellInfo = C_Spell.GetSpellInfo(enchantID)
+            if type(spellInfo) == "table" and spellInfo.name then
+                return spellInfo.name
+            end
+        end
+
+        local spellName = GetSpellInfo(enchantID)
+        if spellName and spellName ~= "" then
+            return spellName
+        end
+
+        return "Enchant " .. tostring(enchantID)
+    end
+
+    if itemLink then
+        local tooltip = EnsureScanTooltip()
+        tooltip:ClearLines()
+        tooltip:SetHyperlink(itemLink)
+
+        return ForEachTooltipLine(function(text)
+            local enchanted = string.match(text, "^Enchanted: (.+)$")
+            if enchanted then
+                return enchanted
+            end
+        end)
+    end
+end
+
+local function FormatSocketGemDetails(profile)
+    local itemLink = profile.itemLink
+    if not itemLink then
+        return nil
+    end
+
+    local socketLines = {}
+
+    if C_TooltipInfo and C_TooltipInfo.GetHyperlink and Enum.TooltipDataLineType then
+        local ok, info = pcall(C_TooltipInfo.GetHyperlink, itemLink)
+        if ok and info and info.lines then
+            for _, line in ipairs(info.lines) do
+                if line.type == Enum.TooltipDataLineType.Gem and line.leftText then
+                    socketLines[#socketLines + 1] = line.leftText
+                end
+            end
+        end
+    end
+
+    if #socketLines == 0 then
+        local mods = Items.ParseItemLinkModifiers(itemLink)
+        local socketCount = profile.sockets or 0
+        if socketCount <= 0 and mods then
+            socketCount = math.max(Items.GetGemsMaxIndex(mods.gems), Items.GetGemSlotCount(itemLink, mods.itemID))
+        end
+        if socketCount <= 0 then
+            return nil
+        end
+
+        local gems = mods and mods.gems or {}
+        for i = 1, socketCount do
+            local gemName = GetGemDisplayName(gems[i])
+            if gemName then
+                socketLines[#socketLines + 1] = string.format("Socket %d: %s", i, gemName)
+            else
+                socketLines[#socketLines + 1] = string.format("Socket %d: Empty", i)
+            end
+        end
+    end
+
+    if #socketLines == 0 then
+        return nil
+    end
+
+    return table.concat(socketLines, "\n")
+end
+
+local function FormatEnchantLine(profile)
+    local mods = profile.itemLink and Items.ParseItemLinkModifiers(profile.itemLink)
+    local enchantText = GetEnchantDisplayName(mods and mods.enchantID, profile.itemLink)
+    if not enchantText or enchantText == "" then
+        return nil
+    end
+
+    if not enchantText:find("Enchanted", 1, true) then
+        return "Enchanted: " .. enchantText
+    end
+
+    return enchantText
+end
+
+function Upgrades.FormatProfileDetails(profile)
+    local parts = {
+        string.format("%s | ilvl %d", GetTrackLabel(profile.trackString), profile.itemLevel),
+    }
+
+    local enchantLine = FormatEnchantLine(profile)
+    if enchantLine then
+        parts[#parts + 1] = enchantLine
+    end
+
+    local socketDetails = FormatSocketGemDetails(profile)
+    if socketDetails then
+        parts[#parts + 1] = socketDetails
+    elseif profile.sockets and profile.sockets > 0 then
+        parts[#parts + 1] = profile.sockets == 1 and "1 empty socket" or (profile.sockets .. " empty sockets")
+    end
+
+    local bonusParts = {}
+    for _, field in ipairs(C.TERTIARY_PRIORITY) do
+        if field ~= "sockets" and profile[field] > 0 then
+            bonusParts[#bonusParts + 1] = C.TERTIARY_LABELS[field]
+        end
+    end
+
+    if #bonusParts > 0 then
+        parts[#parts + 1] = table.concat(bonusParts, ", ")
+    end
+
+    return table.concat(parts, "\n")
 end
 
 local function MatchStandardTrackFromText(text)
@@ -443,6 +568,36 @@ local function GetItemStatsTable(itemLink, itemID)
     end
 end
 
+local function IsEnchantRelatedTooltipLine(text, lineType)
+    if lineType and Enum.TooltipDataLineType
+        and lineType == Enum.TooltipDataLineType.ItemEnchantmentPermanent then
+        return true
+    end
+
+    if not text or text == "" then
+        return false
+    end
+
+    if text:find("^Enchanted:", 1) or text:find("^Enchanted ", 1) then
+        return true
+    end
+
+    return false
+end
+
+local function TooltipTextHasTertiaryStat(text, field)
+    if not text or text == "" then
+        return false
+    end
+
+    local marker = C.TERTIARY_LABELS[field]
+    if not marker or field == "sockets" then
+        return false
+    end
+
+    return text:find(marker, 1, true) ~= nil
+end
+
 local function ScanTooltipForTertiaries(itemLink)
     local stats = {
         avoidance = 0,
@@ -454,17 +609,42 @@ local function ScanTooltipForTertiaries(itemLink)
         return stats
     end
 
+    local function considerLine(leftText, rightText, lineType)
+        if IsEnchantRelatedTooltipLine(leftText, lineType)
+            or IsEnchantRelatedTooltipLine(rightText, lineType) then
+            return
+        end
+
+        local combined = (leftText or "") .. " " .. (rightText or "")
+        if combined:match("^%s*$") then
+            return
+        end
+
+        for field in pairs(stats) do
+            if TooltipTextHasTertiaryStat(combined, field) then
+                stats[field] = 1
+            end
+        end
+    end
+
+    if C_TooltipInfo and C_TooltipInfo.GetHyperlink and Enum.TooltipDataLineType then
+        local ok, info = pcall(C_TooltipInfo.GetHyperlink, itemLink)
+        if ok and info and info.lines then
+            for _, line in ipairs(info.lines) do
+                considerLine(line.leftText, line.rightText, line.type)
+            end
+        end
+    end
+
     local tooltip = EnsureScanTooltip()
     tooltip:ClearLines()
     tooltip:SetHyperlink(itemLink)
 
-    ForEachTooltipLine(function(text)
-        for field, marker in pairs(C.TERTIARY_LABELS) do
-            if field ~= "sockets" and string.find(text, marker, 1, true) then
-                stats[field] = 1
-            end
-        end
-    end)
+    for i = 1, tooltip:NumLines() do
+        local left = _G["LoadoutLockerUpgradeScanTooltipTextLeft" .. i]
+        local right = _G["LoadoutLockerUpgradeScanTooltipTextRight" .. i]
+        considerLine(left and left:GetText(), right and right:GetText())
+    end
 
     return stats
 end
@@ -498,12 +678,10 @@ local function GetTertiaryStats(itemLink, itemID, itemLocation)
         end
     end
 
-    if stats.avoidance == 0 and stats.leech == 0 and stats.speed == 0 then
-        local tooltipStats = ScanTooltipForTertiaries(itemLink)
-        for field, value in pairs(tooltipStats) do
-            if value > stats[field] then
-                stats[field] = value
-            end
+    local tooltipStats = ScanTooltipForTertiaries(itemLink)
+    for field, value in pairs(tooltipStats) do
+        if value > stats[field] then
+            stats[field] = value
         end
     end
 
@@ -695,16 +873,16 @@ local function FindReferenceProfile(savedItemID, invSlot, savedItemLink, gearEnt
     if not profile and playerProfiles then
         local savedLevel = GetSavedItemLevel(gearEntry)
         for _, itemProfile in ipairs(playerProfiles) do
-            if ItemMatchesSavedFamily(savedItemID, itemProfile.itemID) then
-                if ProfileMatchesSavedEntry(itemProfile.itemLink, gearEntry) then
-                    profile = itemProfile
-                    break
-                end
-                if savedLevel > 0
-                    and (itemProfile.itemLevel == 0 or itemProfile.itemLevel == savedLevel) then
-                    profile = itemProfile
-                    break
-                end
+            if not ItemMatchesSavedFamily(savedItemID, itemProfile.itemID) then
+            elseif invSlot and itemProfile.invSlot == invSlot
+                and not ProfileMatchesSavedEntry(itemProfile.itemLink, gearEntry) then
+            elseif ProfileMatchesSavedEntry(itemProfile.itemLink, gearEntry) then
+                profile = itemProfile
+                break
+            elseif savedLevel > 0
+                and (itemProfile.itemLevel == 0 or itemProfile.itemLevel == savedLevel) then
+                profile = itemProfile
+                break
             end
         end
     elseif not profile then
@@ -979,9 +1157,7 @@ function Upgrades.PromptForBetterItems(gearSet, options)
 
     Gear.NormalizeGearSetKeys(gearSet)
 
-    local offers = options and options.offers or Upgrades.FindOffers(gearSet, {
-        slots = options and options.slotFilter,
-    })
+    local offers = options and options.offers or Upgrades.FindOffers(gearSet)
     if #offers == 0 then
         if onComplete then
             onComplete(gearSet, false, nil)
