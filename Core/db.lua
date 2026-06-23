@@ -8,6 +8,35 @@ LoadoutLockerDB = LoadoutLockerDB or {}
 local C = LoadoutLocker.Constants
 local cachedTertiaryPriority
 
+local function GetPromptFlag(key)
+    return LoadoutLockerDB[key] ~= false
+end
+
+local function SetPromptFlag(key, enabled)
+    LoadoutLockerDB[key] = enabled and true or false
+end
+
+local function EnsureAssignmentStore(storeKey, collectionKey, specID)
+    LoadoutLockerDB[storeKey] = LoadoutLockerDB[storeKey] or {}
+    if not specID then
+        return nil
+    end
+
+    local assignments = LoadoutLockerDB[storeKey][specID]
+    if not assignments then
+        assignments = { [collectionKey] = {} }
+        LoadoutLockerDB[storeKey][specID] = assignments
+    elseif not assignments[collectionKey] then
+        assignments[collectionKey] = {}
+    end
+
+    return assignments
+end
+
+local function GetAssignmentStoreIfExists(storeKey, specID)
+    return LoadoutLockerDB[storeKey] and LoadoutLockerDB[storeKey][specID]
+end
+
 local function NormalizeInvSlot(invSlot)
     return LoadoutLocker.Gear.NormalizeInvSlot(invSlot)
 end
@@ -55,15 +84,158 @@ end
 
 function DB:Initialize()
     LoadoutLockerDB = LoadoutLockerDB or {}
+    LoadoutLockerDB.dungeonAssignments = LoadoutLockerDB.dungeonAssignments or {}
+    LoadoutLockerDB.raidAssignments = LoadoutLockerDB.raidAssignments or {}
     self:GetTertiaryPriority()
 end
 
+function DB:AreDungeonPromptsEnabled()
+    return GetPromptFlag("dungeonPromptsEnabled")
+end
+
+function DB:SetDungeonPromptsEnabled(enabled)
+    SetPromptFlag("dungeonPromptsEnabled", enabled)
+end
+
+function DB:GetDungeonAssignments(specID)
+    return EnsureAssignmentStore("dungeonAssignments", "dungeons", specID)
+end
+
+function DB:GetDungeonDefaultConfigID(specID)
+    local assignments = GetAssignmentStoreIfExists("dungeonAssignments", specID)
+    return assignments and assignments.defaultConfigID
+end
+
+function DB:SetDungeonDefaultConfigID(specID, configID)
+    local assignments = self:GetDungeonAssignments(specID)
+    if not assignments then
+        return false
+    end
+
+    assignments.defaultConfigID = configID
+    return true
+end
+
+function DB:GetDungeonConfigID(specID, dungeonKey)
+    local assignments = self:GetDungeonAssignments(specID)
+    if not assignments then
+        return nil
+    end
+
+    local override = assignments.dungeons[dungeonKey]
+    if override then
+        return override
+    end
+
+    return assignments.defaultConfigID
+end
+
+function DB:SetDungeonConfigID(specID, dungeonKey, configID)
+    local assignments = self:GetDungeonAssignments(specID)
+    if not assignments or not dungeonKey then
+        return false
+    end
+
+    if configID then
+        assignments.dungeons[dungeonKey] = configID
+    else
+        assignments.dungeons[dungeonKey] = nil
+    end
+
+    return true
+end
+
+function DB:ClearDungeonConfigID(specID, dungeonKey)
+    return self:SetDungeonConfigID(specID, dungeonKey, nil)
+end
+
+function DB:AreRaidPromptsEnabled()
+    return GetPromptFlag("raidPromptsEnabled")
+end
+
+function DB:SetRaidPromptsEnabled(enabled)
+    SetPromptFlag("raidPromptsEnabled", enabled)
+end
+
+function DB:GetRaidAssignments(specID)
+    return EnsureAssignmentStore("raidAssignments", "raids", specID)
+end
+
+function DB:GetRaidAssignmentIfExists(specID, raidKey)
+    local assignments = GetAssignmentStoreIfExists("raidAssignments", specID)
+    return assignments and assignments.raids[raidKey]
+end
+
+function DB:GetRaidAssignment(specID, raidKey)
+    local assignments = self:GetRaidAssignments(specID)
+    if not assignments then
+        return nil
+    end
+
+    local raidAssignment = assignments.raids[raidKey]
+    if not raidAssignment then
+        raidAssignment = { bosses = {} }
+        assignments.raids[raidKey] = raidAssignment
+    elseif not raidAssignment.bosses then
+        raidAssignment.bosses = {}
+    end
+
+    return raidAssignment
+end
+
+function DB:GetRaidDefaultConfigID(specID)
+    local assignments = GetAssignmentStoreIfExists("raidAssignments", specID)
+    return assignments and assignments.defaultConfigID
+end
+
+function DB:SetRaidDefaultConfigID(specID, configID)
+    local assignments = self:GetRaidAssignments(specID)
+    if not assignments then
+        return false
+    end
+
+    assignments.defaultConfigID = configID
+    return true
+end
+
+function DB:GetRaidBossConfigID(specID, raidKey, bossKey)
+    local assignments = GetAssignmentStoreIfExists("raidAssignments", specID)
+    if not assignments then
+        return nil
+    end
+
+    local raidAssignment = assignments.raids and assignments.raids[raidKey]
+    if raidAssignment and raidAssignment.bosses and raidAssignment.bosses[bossKey] then
+        return raidAssignment.bosses[bossKey]
+    end
+
+    return assignments.defaultConfigID
+end
+
+function DB:SetRaidBossConfigID(specID, raidKey, bossKey, configID)
+    if not bossKey then
+        return false
+    end
+
+    local raidAssignment = self:GetRaidAssignment(specID, raidKey)
+    if not raidAssignment then
+        return false
+    end
+
+    raidAssignment.bosses[bossKey] = configID
+    return true
+end
+
+function DB:ClearRaidBossConfigID(specID, raidKey, bossKey)
+    return self:SetRaidBossConfigID(specID, raidKey, bossKey, nil)
+end
+
 function DB:AreUpgradeChecksEnabled()
-    return LoadoutLockerDB.upgradeChecksEnabled ~= false
+    return GetPromptFlag("upgradeChecksEnabled")
 end
 
 function DB:SetUpgradeChecksEnabled(enabled)
-    LoadoutLockerDB.upgradeChecksEnabled = enabled and true or false
+    SetPromptFlag("upgradeChecksEnabled", enabled)
 end
 
 function DB:NormalizeTertiaryPriority(priority)

@@ -4,6 +4,8 @@ local Print = LoadoutLocker.Print
 local DB = LoadoutLocker.DB
 local Gear = LoadoutLocker.Gear
 local Menu = LoadoutLocker.Menu
+local DungeonUI = LoadoutLocker.DungeonUI
+local RaidUI = LoadoutLocker.RaidUI
 
 local loginSynced
 
@@ -14,7 +16,11 @@ local function ShowHelp()
     Print("/locker list - List saved gear sets for your current specialization")
     Print("/locker delete - Remove the saved gear set for the active talent loadout")
     Print("/locker scan - Check bags for better versions of current loadout items")
+    Print("/locker sim dungeon - Preview the dungeon loadout prompt")
+    Print("/locker sim raid [march] - Simulate being inside a raid")
+    Print("/locker sim raid stop - End raid simulation")
     Print("/locker help - Show this help")
+    Print("Use /locker and open the Dungeons or Raids tab to assign loadouts.")
 end
 
 local function HandleSlashCommand(msg)
@@ -30,6 +36,14 @@ local function HandleSlashCommand(msg)
         Gear.List()
     elseif msg == "scan" then
         Gear.ScanForUpgrades()
+    elseif msg == "sim dungeon" or msg == "simdungeon" then
+        DungeonUI.Simulate()
+    elseif msg == "sim raid stop" or msg == "sim raid off" then
+        RaidUI.Simulate("stop")
+    elseif msg == "sim raid" or msg == "simraid" then
+        RaidUI.Simulate()
+    elseif msg:match("^sim raid ") then
+        RaidUI.Simulate(strtrim(msg:sub(10)))
     elseif msg == "delete" or msg == "clear" then
         Gear.Delete()
     else

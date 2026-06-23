@@ -255,7 +255,7 @@ local function ScheduleSaveButtonRefresh()
     end
 
     talentUIRefreshScheduled = true
-    C_Timer.After(0, function()
+    C_Timer.After(C.LOADOUT_APPLY_DELAY, function()
         talentUIRefreshScheduled = false
         RefreshSaveButton(false)
     end)

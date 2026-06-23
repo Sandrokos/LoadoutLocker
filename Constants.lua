@@ -95,6 +95,8 @@ function Constants.GetTertiarySettingLabel(field)
     return entry and entry.setting or field
 end
 
+Constants.NORMAL_RAID_DIFFICULTY_ID = 14
+
 Constants.DIALOG_BACKDROP = {
     bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
     edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",

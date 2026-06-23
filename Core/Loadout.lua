@@ -152,4 +152,32 @@ function Loadout.GetConfigList(specID)
     return list
 end
 
+function Loadout.SwitchTo(configID, specID)
+    specID = specID or Loadout.GetSpecID()
+    if not specID or not configID or Loadout.IsStarterBuild(configID) then
+        return false, "invalid"
+    end
+
+    if Loadout.GetLoadoutConfigID(specID) == configID then
+        return true, "unchanged"
+    end
+
+    if not C_ClassTalents or not C_ClassTalents.LoadConfig then
+        return false, "api"
+    end
+
+    local result = C_ClassTalents.LoadConfig(configID, true)
+    if result == 0 then
+        return false, "error"
+    end
+
+    if C_ClassTalents.UpdateLastSelectedSavedConfigID then
+        C_ClassTalents.UpdateLastSelectedSavedConfigID(specID, configID)
+    else
+        pendingLoadoutSwitch = { specID = specID, configID = configID }
+    end
+
+    return true, result
+end
+
 Loadout.HookSelection()

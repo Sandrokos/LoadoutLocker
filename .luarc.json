@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
+  "diagnostics.globals": [
+    "LoadoutLocker",
+    "LoadoutLockerDB",
+    "SLASH_LOADOUTLOCKER1",
+    "SLASH_LOADOUTLOCKER2",
+    "event",
+    "arg1",
+    "arg2",
+    "arg3",
+    "arg4",
+    "arg5",
+    "arg6",
+    "arg7",
+    "arg8",
+    "arg9"
+  ],
+  "workspace.checkThirdParty": false,
+  "workspace.ignoreDir": [
+    ".git",
+    "Libs"
+  ]
+}

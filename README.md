@@ -58,8 +58,6 @@ Use **Do not ask again** on a prompt to ignore that equipment slot for the curre
 | Command | Description |
 |---------|-------------|
 | `/locker` | Open the LoadoutLocker menu |
-| `/locker settings` | Open the menu to the Priority tab |
-| `/locker priority` | Same as `settings` |
 
 The **Priority** tab controls whether upgrade prompts run on loadout change and the order tertiary stats break ties.
 
