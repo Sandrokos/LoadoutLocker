@@ -1,0 +1,9 @@
+package-as: LoadoutLocker
+
+ignore:
+  - LICENSE
+  - LICENSE.*
+  - license
+  - license.*
+  - README.md
+  - readme.md
