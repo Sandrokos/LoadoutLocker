@@ -1009,6 +1009,11 @@ function Upgrades.IsPromptActive()
     return offerState.gearSet ~= nil
 end
 
+function Upgrades.DismissPrompt()
+    LoadoutLocker.UI.HideUpgradeOffer()
+    ClearOfferState()
+end
+
 function Upgrades.PromptForBetterItems(gearSet, options)
     local onComplete = options and options.onComplete
 
@@ -1020,7 +1025,7 @@ function Upgrades.PromptForBetterItems(gearSet, options)
     end
 
     if offerState.gearSet then
-        return
+        Upgrades.DismissPrompt()
     end
 
     Gear.NormalizeGearSetKeys(gearSet)

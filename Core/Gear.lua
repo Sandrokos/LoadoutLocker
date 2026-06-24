@@ -15,6 +15,7 @@ local Items = LoadoutLocker.Items
 local Loadout = LoadoutLocker.Loadout
 
 local DB = LoadoutLocker.DB
+local EquipmentSet = LoadoutLocker.EquipmentSet
 local Print = LoadoutLocker.Print
 local RefreshUI = LoadoutLocker.RefreshUI
 
@@ -23,6 +24,72 @@ LoadoutLocker.Gear = Gear
 
 local equipQueueRunning
 local loadoutApplyTimer
+local specChangeInProgress
+local equipmentSetSwapPending
+local gearApplyLocked
+local swapIdleCallbacks = {}
+local equipmentSetSwapCallbacks = {}
+
+local swapEventFrame = CreateFrame("Frame")
+
+local function IsGearSwapActive()
+    return equipQueueRunning or equipmentSetSwapPending or gearApplyLocked
+end
+
+local function NotifySwapIdle()
+    if IsGearSwapActive() then
+        return
+    end
+
+    local callbacks = swapIdleCallbacks
+    swapIdleCallbacks = {}
+    for _, callback in ipairs(callbacks) do
+        callback()
+    end
+end
+
+local function WaitForSwapIdle(callback)
+    if not IsGearSwapActive() then
+        C_Timer.After(C.EQUIP_SLOT_DELAY, callback)
+        return
+    end
+
+    swapIdleCallbacks[#swapIdleCallbacks + 1] = callback
+end
+
+local function ReleaseGearApplyLock()
+    gearApplyLocked = false
+    NotifySwapIdle()
+end
+
+local function NotifyEquipmentSetSwapFinished()
+    equipmentSetSwapPending = false
+    swapEventFrame:UnregisterEvent("EQUIPMENT_SWAP_FINISHED")
+
+    local callbacks = equipmentSetSwapCallbacks
+    equipmentSetSwapCallbacks = {}
+    for _, callback in ipairs(callbacks) do
+        callback()
+    end
+
+    NotifySwapIdle()
+end
+
+local function WaitForEquipmentSetSwap(callback)
+    if not equipmentSetSwapPending then
+        C_Timer.After(C.EQUIP_SLOT_DELAY, callback)
+        return
+    end
+
+    equipmentSetSwapCallbacks[#equipmentSetSwapCallbacks + 1] = callback
+    swapEventFrame:RegisterEvent("EQUIPMENT_SWAP_FINISHED")
+end
+
+swapEventFrame:SetScript("OnEvent", function(_, event)
+    if event == "EQUIPMENT_SWAP_FINISHED" then
+        NotifyEquipmentSetSwapFinished()
+    end
+end)
 
 local function ModifiersMatch(modsA, modsB)
     if not modsA or not modsB then
@@ -243,10 +310,21 @@ end
 
 function Gear.GetEntryItemID(entry)
     if type(entry) == "table" then
-        return entry.itemID
+        if entry.itemID then
+            return entry.itemID
+        end
+
+        if entry.itemLink then
+            local mods = Items.ParseItemLinkModifiers(entry.itemLink)
+            if mods and mods.itemID then
+                return mods.itemID
+            end
+        end
+
+        return nil
     end
 
-    return entry
+    return tonumber(entry) or entry
 end
 
 function Gear.GetEntryItemLink(entry)
@@ -320,7 +398,10 @@ local function MergeGearSnapshot(snapshot, expectedGearSet)
         if equippedID and entry and SlotEntryMatchesEquipped(invSlot, entry, equippedLink, equippedID) then
             snapshot[invSlot] = Items.ToGearEntry({ itemID = equippedID, itemLink = equippedLink })
         elseif type(entry) == "table" and entry.itemLink then
-            snapshot[invSlot] = Items.ToGearEntry({ itemID = entry.itemID, itemLink = entry.itemLink })
+            snapshot[invSlot] = Items.ToGearEntry({
+                itemID = Gear.GetEntryItemID(entry),
+                itemLink = entry.itemLink,
+            })
         elseif entry then
             snapshot[invSlot] = entry
         end
@@ -329,9 +410,20 @@ local function MergeGearSnapshot(snapshot, expectedGearSet)
     return snapshot
 end
 
+local function BuildWorkingGearSet(gearSet)
+    if not gearSet then
+        return gearSet
+    end
+
+    Gear.NormalizeGearSetKeys(gearSet)
+    return MergeGearSnapshot(SnapshotEquippedGear(), gearSet)
+end
+
 local function SaveEquippedGearSet(specID, configID, expectedGearSet)
+    local loadoutName = Loadout.GetLoadoutName(configID)
     local snapshot = MergeGearSnapshot(SnapshotEquippedGear(), expectedGearSet)
-    DB:CreateOrUpdateGearSet(specID, configID, snapshot, Loadout.GetLoadoutName(configID))
+    DB:CreateOrUpdateGearSet(specID, configID, snapshot, loadoutName)
+    EquipmentSet.ScheduleSyncForLoadout(specID, configID, loadoutName)
     RefreshUI()
 end
 
@@ -712,11 +804,15 @@ local function PrintGearDiffFailures(diff, reported)
 
     for _, change in ipairs(diff.equip) do
         local itemID = ResolveGearEntry(change.entry)
-        ReportSwapIssue(
-            reported,
-            "missing:" .. tostring(itemID),
-            "Missing item: " .. Items.GetDisplayName(itemID)
-        )
+        if itemID and GetInventoryItemID("player", change.invSlot) == itemID then
+            -- Correct item is equipped; link/modifier checks can lag after swaps.
+        else
+            ReportSwapIssue(
+                reported,
+                "missing:" .. tostring(itemID),
+                "Missing item: " .. Items.GetDisplayName(itemID)
+            )
+        end
     end
 
     for _, invSlot in ipairs(diff.unequip) do
@@ -726,6 +822,31 @@ local function PrintGearDiffFailures(diff, reported)
             string.format("%s still has the wrong item equipped.", C.GetSlotLabel(invSlot))
         )
     end
+end
+
+local function IsAcceptableRemainingDiff(remaining, gearSet)
+    for _, change in ipairs(remaining.equip) do
+        local targetItemID = Gear.GetEntryItemID(change.entry)
+        if targetItemID and GetInventoryItemID("player", change.invSlot) ~= targetItemID then
+            return false
+        end
+    end
+
+    for _, invSlot in ipairs(remaining.unequip) do
+        local targetEntry = Gear.GetGearSetEntry(gearSet, invSlot)
+        local targetItemID = Gear.GetEntryItemID(targetEntry)
+        local equippedID = GetInventoryItemID("player", invSlot)
+
+        if equippedID and targetItemID and equippedID ~= targetItemID then
+            return false
+        end
+
+        if equippedID and not targetItemID then
+            return false
+        end
+    end
+
+    return true
 end
 
 local function RunGearSwap(gearSet, onComplete, gearDiff)
@@ -763,18 +884,26 @@ local function RunGearSwap(gearSet, onComplete, gearDiff)
         if onComplete then
             onComplete(ready ~= false)
         end
+        C_Timer.After(C.EQUIP_SLOT_DELAY, NotifySwapIdle)
     end
 
     local function VerifyAndComplete(attempt)
         attempt = attempt or 1
-        C_Timer.After(C.SAVE_RETRY_DELAY, function()
+        local delay = (attempt == 1) and (C.EQUIP_SLOT_DELAY * 2) or C.EQUIP_SLOT_DELAY
+
+        C_Timer.After(delay, function()
             local remaining = Gear.BuildGearDiff(gearSet)
             if remaining.empty then
                 FinishSwap(true)
                 return
             end
 
-            if attempt < 2 then
+            if IsAcceptableRemainingDiff(remaining, gearSet) then
+                FinishSwap(true)
+                return
+            end
+
+            if attempt < 6 then
                 VerifyAndComplete(attempt + 1)
                 return
             end
@@ -788,6 +917,7 @@ local function RunGearSwap(gearSet, onComplete, gearDiff)
         if InCombatLockdown() then
             equipQueueRunning = false
             Print("Combat started. Gear swap cancelled.")
+            C_Timer.After(0, NotifySwapIdle)
             return
         end
 
@@ -819,7 +949,8 @@ local function RunGearSwap(gearSet, onComplete, gearDiff)
             equipIndex = equipIndex + 1
 
             if NeedsEquipForEntry(change.invSlot, change.entry) then
-                if not EquipSlot(change.invSlot, change.entry, usedLocations, bagState) then
+                if not EquipSlot(change.invSlot, change.entry, usedLocations, bagState)
+                    and NeedsEquipForEntry(change.invSlot, change.entry) then
                     local itemID = ResolveGearEntry(change.entry)
                     ReportSwapIssue(
                         reported,
@@ -878,6 +1009,7 @@ function Gear.Save(specID, configID)
     end
 
     DB:CreateOrUpdateGearSet(context.specID, context.configID, SnapshotEquippedGear(), context.name)
+    EquipmentSet.SyncForLoadout(context.specID, context.configID, context.name)
     Print(string.format("Saved gear for %s.", context.name))
     RefreshUI()
     return true
@@ -901,6 +1033,7 @@ function Gear.DeleteSavedGear(configID, specID, notFoundMessage)
     end
 
     local loadoutName = Loadout.ResolveLoadoutName(configID, entry.loadoutName)
+    EquipmentSet.OnGearSetDeleted(specID, configID, entry)
     Print(string.format("Removed saved gear for %s.", loadoutName))
     RefreshUI()
     return true
@@ -935,6 +1068,7 @@ function Gear.CopyGearSetToLoadout(sourceConfigID, targetConfigID, specID)
     local sourceName = Loadout.GetLoadoutName(sourceConfigID)
     local targetName = Loadout.GetLoadoutName(targetConfigID)
     DB:CopyGearSetToLoadout(specID, sourceConfigID, targetConfigID, targetName)
+    EquipmentSet.LinkCopiedLoadouts(specID, sourceConfigID, targetConfigID)
     Print(string.format("Copied gear set from %s to %s.", sourceName, targetName))
     RefreshUI()
     return true
@@ -976,38 +1110,259 @@ function Gear.List(specID)
     end
 end
 
+function Gear.IsSwapActive()
+    return IsGearSwapActive()
+end
+
 function Gear.ScheduleLoadoutGearApply()
+    if specChangeInProgress then
+        return
+    end
+
     if loadoutApplyTimer then
         loadoutApplyTimer:Cancel()
     end
 
     loadoutApplyTimer = C_Timer.NewTimer(C.LOADOUT_APPLY_DELAY, function()
         loadoutApplyTimer = nil
+        if IsGearSwapActive() then
+            Gear.ScheduleLoadoutGearApply()
+            return
+        end
         Gear.ApplyGearForLoadoutChange()
     end)
 end
 
-local function PromptAndApplyGear(specID, configID, gearSet, options)
-    options = options or {}
-    Gear.NormalizeGearSetKeys(gearSet)
+local function ValidateEquippedGear(gearSet, onComplete)
+    local function check(attempt)
+        attempt = attempt or 1
+        local delay = (attempt == 1) and (C.EQUIP_SLOT_DELAY * 2) or C.EQUIP_SLOT_DELAY
 
-    local diff = Gear.BuildGearDiff(gearSet)
-    local alreadyAppliedMessage = options.alreadyAppliedMessage or "Already wearing saved gear for this loadout."
+        C_Timer.After(delay, function()
+            local remaining = Gear.BuildGearDiff(gearSet)
+            if remaining.empty or IsAcceptableRemainingDiff(remaining, gearSet) then
+                onComplete(true)
+                return
+            end
 
+            if attempt < 6 then
+                check(attempt + 1)
+                return
+            end
+
+            PrintGearDiffFailures(remaining, {})
+            onComplete(false)
+        end)
+    end
+
+    check(1)
+end
+
+local function RunUpgradeStep(specID, configID, gearSet, options, onComplete)
     if not (options.forceUpgradeCheck or DB:AreUpgradeChecksEnabled()) then
+        onComplete(gearSet, false)
+        return
+    end
+
+    local workingGearSet = BuildWorkingGearSet(gearSet)
+
+    local offers = options.offers
+    if not offers then
+        offers = LoadoutLocker.Upgrades.FindOffers(workingGearSet, {
+            specID = specID,
+            configID = configID,
+        })
+    end
+
+    if options.requireOffers and #offers == 0 then
+        Print(options.noOffersMessage or "No better items found in your bags.")
+        onComplete(gearSet, false)
+        return
+    end
+
+    if #offers == 0 then
+        onComplete(gearSet, false)
+        return
+    end
+
+    LoadoutLocker.Upgrades.PromptForBetterItems(workingGearSet, {
+        specID = specID,
+        configID = configID,
+        offers = offers,
+        onComplete = function(updatedGearSet, changed)
+            if options.requireChange and not changed then
+                Print(options.noChangeMessage or "No upgrades selected.")
+                onComplete(gearSet, false)
+                return
+            end
+
+            if not changed then
+                onComplete(gearSet, false)
+                return
+            end
+
+            local swapDiff = Gear.BuildGearDiff(updatedGearSet)
+            if swapDiff.empty then
+                onComplete(updatedGearSet, true)
+                return
+            end
+
+            ApplyGearSwap(updatedGearSet, function(ready)
+                onComplete(updatedGearSet, ready ~= false)
+            end, swapDiff)
+        end,
+    })
+end
+
+local function RunUpgradeOnlyPipeline(specID, configID, gearSet, options)
+    gearApplyLocked = true
+
+    local function finish(success, changed)
+        if success then
+            if changed then
+                Print(options.upgradedMessage or "Applied and saved upgraded gear set.")
+            end
+            if options.onApplied then
+                options.onApplied()
+            end
+        elseif options.onApplyFailed then
+            options.onApplyFailed()
+        end
+    end
+
+    local function afterUpgrades(workingGearSet, changed)
+        if changed then
+            SaveEquippedGearSet(specID, configID, workingGearSet)
+        end
+
+        ValidateEquippedGear(workingGearSet, function(valid)
+            finish(valid, changed)
+        end)
+    end
+
+    Gear.NormalizeGearSetKeys(gearSet)
+    local workingGearSet = BuildWorkingGearSet(gearSet)
+    RunUpgradeStep(specID, configID, gearSet, options, afterUpgrades)
+end
+
+local function RunLoadoutGearPipeline(specID, configID, gearSet, options)
+    local function finish(success, changed)
+        if success then
+            if changed then
+                Print(options.upgradedMessage or "Applied and saved upgraded gear set.")
+            elseif options.appliedMessage then
+                Print(options.appliedMessage)
+            end
+            if options.onApplied then
+                options.onApplied()
+            end
+        elseif options.onApplyFailed then
+            options.onApplyFailed()
+        end
+    end
+
+    local function afterValidation(success, workingGearSet, changed)
+        finish(success, changed)
+    end
+
+    local function afterUpgrades(workingGearSet, changed)
+        if changed then
+            SaveEquippedGearSet(specID, configID, workingGearSet)
+        end
+
+        ValidateEquippedGear(workingGearSet, function(valid)
+            afterValidation(valid, workingGearSet, changed)
+        end)
+    end
+
+    Gear.NormalizeGearSetKeys(gearSet)
+    local workingGearSet = BuildWorkingGearSet(gearSet)
+
+    local function afterEquipmentSet()
+        RunUpgradeStep(specID, configID, gearSet, options, afterUpgrades)
+    end
+
+    local function fallbackManualSwap()
+        local diff = Gear.BuildGearDiff(gearSet)
         if diff.empty then
-            Print(alreadyAppliedMessage)
+            afterEquipmentSet()
             return
         end
 
         ApplyGearSwap(gearSet, function(ready)
             if not ready then
+                if options.onApplyFailed then
+                    options.onApplyFailed()
+                end
+                return
+            end
+
+            afterEquipmentSet()
+        end, diff)
+    end
+
+    if EquipmentSet.TryUse(specID, configID) then
+        Gear.NormalizeGearSetKeys(gearSet)
+        if Gear.BuildGearDiff(gearSet).empty then
+            C_Timer.After(C.EQUIP_SLOT_DELAY, afterEquipmentSet)
+            return
+        end
+
+        equipmentSetSwapPending = true
+        swapEventFrame:RegisterEvent("EQUIPMENT_SWAP_FINISHED")
+        C_Timer.After(3, function()
+            if equipmentSetSwapPending then
+                NotifyEquipmentSetSwapFinished()
+            end
+        end)
+
+        WaitForEquipmentSetSwap(function()
+            afterEquipmentSet()
+        end)
+        return
+    end
+
+    fallbackManualSwap()
+end
+
+local function PromptAndApplyGear(specID, configID, gearSet, options)
+    options = options or {}
+    Gear.NormalizeGearSetKeys(gearSet)
+    local workingGearSet = BuildWorkingGearSet(gearSet)
+
+    local function FinishApplied(ready)
+        if ready == false then
+            if options.onApplyFailed then
+                options.onApplyFailed()
+            end
+            return
+        end
+
+        if options.onApplied then
+            options.onApplied()
+        end
+    end
+
+    local diff = Gear.BuildGearDiff(workingGearSet)
+    local alreadyAppliedMessage = options.alreadyAppliedMessage or "Already wearing saved gear for this loadout."
+
+    if not (options.forceUpgradeCheck or DB:AreUpgradeChecksEnabled()) then
+        if diff.empty then
+            Print(alreadyAppliedMessage)
+            FinishApplied(true)
+            return
+        end
+
+        ApplyGearSwap(gearSet, function(ready)
+            if not ready then
+                FinishApplied(false)
                 return
             end
 
             if options.appliedMessage then
                 Print(options.appliedMessage)
             end
+            FinishApplied(ready)
         end, diff)
         return
     end
@@ -1017,26 +1372,29 @@ local function PromptAndApplyGear(specID, configID, gearSet, options)
         configID = configID,
     }
     if not options.offers then
-        options.offers = LoadoutLocker.Upgrades.FindOffers(gearSet, findOptions)
+        options.offers = LoadoutLocker.Upgrades.FindOffers(workingGearSet, findOptions)
     end
 
     if options.requireOffers and #options.offers == 0 then
         Print(options.noOffersMessage or "No better items found in your bags.")
+        FinishApplied(false)
         return
     end
 
     if diff.empty and #options.offers == 0 then
         Print(alreadyAppliedMessage)
+        FinishApplied(true)
         return
     end
 
-    LoadoutLocker.Upgrades.PromptForBetterItems(gearSet, {
+    LoadoutLocker.Upgrades.PromptForBetterItems(workingGearSet, {
         specID = specID,
         configID = configID,
         offers = options.offers,
         onComplete = function(updatedGearSet, changed)
             if options.requireChange and not changed then
                 Print(options.noChangeMessage or "No upgrades selected.")
+                FinishApplied(false)
                 return
             end
 
@@ -1050,11 +1408,13 @@ local function PromptAndApplyGear(specID, configID, gearSet, options)
                 else
                     Print(alreadyAppliedMessage)
                 end
+                FinishApplied(true)
                 return
             end
 
             ApplyGearSwap(updatedGearSet, function(ready)
                 if not ready then
+                    FinishApplied(false)
                     return
                 end
 
@@ -1064,45 +1424,145 @@ local function PromptAndApplyGear(specID, configID, gearSet, options)
                 elseif options.appliedMessage then
                     Print(options.appliedMessage)
                 end
+                FinishApplied(ready)
             end, swapDiff)
         end,
     })
 end
 
 function Gear.ApplyGearForLoadoutChange()
-    if LoadoutLocker.Upgrades.IsPromptActive() or equipQueueRunning then
+    if LoadoutLocker.Upgrades.IsPromptActive() or IsGearSwapActive() then
+        Gear.ScheduleLoadoutGearApply()
         return
     end
 
-    local switch = Loadout.ConsumePendingSwitch()
-    if not switch then
+    local specID = Loadout.GetSpecID()
+    if not specID then
         return
     end
 
-    local specID = switch.specID
-    local configID = switch.configID
-    local previousConfigID = Loadout.GetPreviousConfigID(specID)
-    Loadout.RememberActive(specID, configID)
+    local pending = Loadout.PeekPendingSwitch()
+    local configID = Loadout.GetLoadoutConfigID(specID)
+    if pending and pending.specID == specID and pending.configID then
+        configID = pending.configID
+    end
 
-    if previousConfigID == nil or previousConfigID == configID then
+    if not configID or Loadout.IsStarterBuild(configID) then
         return
     end
+
+    local shouldApplyGear = Loadout.ShouldApplyGearForSwitch(specID, configID)
+    local shouldRunUpgrades = Loadout.ShouldRunUpgradeCheck(specID, configID)
+
+    if not shouldApplyGear and not shouldRunUpgrades then
+        return
+    end
+
+    Loadout.ConsumePendingSwitch()
 
     local gearSet = DB:GetGearSet(specID, configID)
     if not gearSet then
+        if not Loadout.IsStarterBuild(configID) then
+            Loadout.RememberAppliedSpec(specID)
+            Loadout.RememberUpgradeCheck(specID, configID)
+        end
         return
     end
 
     gearSet = DB:CopyGearSet(gearSet)
-    Print(string.format("Talent loadout changed to %s. Applying saved gear...", Loadout.GetLoadoutName(configID)))
 
-    PromptAndApplyGear(specID, configID, gearSet, {
+    local applyOptions = {
         appliedMessage = "Applied saved gear set.",
         upgradedMessage = "Applied and saved upgraded gear set.",
-    })
+        onApplied = function()
+            Loadout.RememberActive(specID, configID)
+            Loadout.RememberAppliedSpec(specID)
+            Loadout.RememberUpgradeCheck(specID, configID)
+            ReleaseGearApplyLock()
+        end,
+        onApplyFailed = ReleaseGearApplyLock,
+    }
+    if shouldRunUpgrades or DB:AreUpgradeChecksEnabled() then
+        applyOptions.forceUpgradeCheck = true
+    end
+
+    if not shouldApplyGear then
+        RunUpgradeOnlyPipeline(specID, configID, gearSet, applyOptions)
+        return
+    end
+
+    local loadoutName = Loadout.GetLoadoutName(configID)
+    if Loadout.GetLastAppliedSpecID() ~= specID then
+        Print(string.format("Specialization changed. Applying saved gear for %s...", loadoutName))
+    else
+        Print(string.format("Talent loadout changed to %s. Applying saved gear...", loadoutName))
+    end
+
+    gearApplyLocked = true
+    RunLoadoutGearPipeline(specID, configID, gearSet, applyOptions)
+end
+
+local function ScheduleSpecGearApply(attempt)
+    attempt = attempt or 1
+
+    C_Timer.After(C.LOADOUT_APPLY_DELAY, function()
+        if IsGearSwapActive() then
+            WaitForSwapIdle(function()
+                ScheduleSpecGearApply(attempt)
+            end)
+            return
+        end
+
+        local specID = Loadout.GetSpecID()
+        if specID then
+            local configID = Loadout.GetLoadoutConfigID(specID)
+            if configID and not Loadout.IsStarterBuild(configID) then
+                Loadout.QueueSwitch(specID, configID)
+            end
+        end
+
+        Gear.ApplyGearForLoadoutChange()
+
+        if Loadout.GetLastAppliedSpecID() == Loadout.GetSpecID() then
+            specChangeInProgress = false
+            return
+        end
+
+        if IsGearSwapActive() then
+            WaitForSwapIdle(function()
+                if Loadout.GetLastAppliedSpecID() == Loadout.GetSpecID() then
+                    specChangeInProgress = false
+                elseif attempt < 5 then
+                    ScheduleSpecGearApply(attempt + 1)
+                else
+                    specChangeInProgress = false
+                end
+            end)
+            return
+        end
+
+        if attempt >= 5 then
+            specChangeInProgress = false
+            return
+        end
+
+        ScheduleSpecGearApply(attempt + 1)
+    end)
+end
+
+function Gear.OnSpecChanged()
+    specChangeInProgress = true
+    Loadout.ClearPendingSwitch()
+    ScheduleSpecGearApply(1)
+
+    C_Timer.After(0, function()
+        RefreshUI()
+    end)
 end
 
 function Gear.ScanForUpgrades()
+    LoadoutLocker.Upgrades.DismissPrompt()
+
     local gearSet, context = Loadout.GetActiveGearSetCopy()
     if not context then
         Print("No talent loadout selected.")
@@ -1114,6 +1574,8 @@ function Gear.ScanForUpgrades()
         return
     end
 
+    Loadout.ClearUpgradeCheck(context.specID)
+
     PromptAndApplyGear(context.specID, context.configID, gearSet, {
         forceUpgradeCheck = true,
         requireOffers = true,
@@ -1121,17 +1583,5 @@ function Gear.ScanForUpgrades()
         noOffersMessage = "No better items found in your bags.",
         noChangeMessage = "No upgrades selected.",
     })
-end
-
-function Gear.OnSpecChanged()
-    local specID = Loadout.GetSpecID()
-    if not specID then
-        return
-    end
-
-    C_Timer.After(0, function()
-        Loadout.RememberActive(specID, Loadout.GetLoadoutConfigID(specID))
-        RefreshUI()
-    end)
 end
 

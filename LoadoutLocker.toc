@@ -13,6 +13,7 @@ Core\Instance.lua
 Core\db.lua
 Core\Items.lua
 Core\Loadout.lua
+Core\EquipmentSet.lua
 Core\Gear.lua
 Core\Upgrades.lua
 Dungeons\Constants.lua

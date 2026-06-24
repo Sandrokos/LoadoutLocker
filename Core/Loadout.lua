@@ -8,6 +8,8 @@ local DB = LoadoutLocker.DB
 local activeLoadoutBySpec = {}
 local pendingLoadoutSwitch
 local loadoutSelectionHooked
+local lastAppliedSpecID
+local lastUpgradeCheckBySpec = {}
 
 function Loadout.GetSpecID()
     local specIndex = C_SpecializationInfo.GetSpecialization()
@@ -93,10 +95,75 @@ function Loadout.GetActiveGearSetCopy(specID)
     return DB:CopyGearSet(context.gear), context
 end
 
+function Loadout.QueueSwitch(specID, configID)
+    if not specID or not configID or Loadout.IsStarterBuild(configID) then
+        return
+    end
+
+    if Loadout.GetSpecID() ~= specID then
+        return
+    end
+
+    pendingLoadoutSwitch = { specID = specID, configID = configID }
+end
+
+function Loadout.ClearPendingSwitch()
+    pendingLoadoutSwitch = nil
+end
+
+function Loadout.GetLastAppliedSpecID()
+    return lastAppliedSpecID
+end
+
+function Loadout.RememberAppliedSpec(specID)
+    lastAppliedSpecID = specID
+end
+
+function Loadout.ShouldApplyGearForSwitch(specID, configID)
+    if not specID or not configID then
+        return false
+    end
+
+    local previousConfigID = Loadout.GetPreviousConfigID(specID)
+    if lastAppliedSpecID ~= specID then
+        return true
+    end
+
+    if previousConfigID == nil then
+        return true
+    end
+
+    return previousConfigID ~= configID
+end
+
 function Loadout.ConsumePendingSwitch()
     local switch = pendingLoadoutSwitch
     pendingLoadoutSwitch = nil
     return switch
+end
+
+function Loadout.PeekPendingSwitch()
+    return pendingLoadoutSwitch
+end
+
+function Loadout.ShouldRunUpgradeCheck(specID, configID)
+    if not specID or not configID then
+        return false
+    end
+
+    return lastUpgradeCheckBySpec[specID] ~= configID
+end
+
+function Loadout.RememberUpgradeCheck(specID, configID)
+    if specID and configID then
+        lastUpgradeCheckBySpec[specID] = configID
+    end
+end
+
+function Loadout.ClearUpgradeCheck(specID)
+    if specID then
+        lastUpgradeCheckBySpec[specID] = nil
+    end
 end
 
 function Loadout.GetPreviousConfigID(specID)
@@ -115,7 +182,16 @@ function Loadout.HookSelection()
             return
         end
 
+        if Loadout.GetSpecID() ~= specID then
+            return
+        end
+
         pendingLoadoutSwitch = { specID = specID, configID = configID }
+
+        local gear = LoadoutLocker.Gear
+        if gear and gear.ScheduleLoadoutGearApply then
+            gear.ScheduleLoadoutGearApply()
+        end
     end)
 end
 
@@ -124,6 +200,7 @@ function Loadout.RecordCurrent()
     local configID = specID and Loadout.GetLoadoutConfigID(specID)
     if specID and configID then
         Loadout.RememberActive(specID, configID)
+        Loadout.RememberAppliedSpec(specID)
         return true
     end
 end

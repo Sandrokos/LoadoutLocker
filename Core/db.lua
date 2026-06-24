@@ -440,7 +440,21 @@ function DB:CreateOrUpdateGearSet(specID, configID, gear, loadoutName)
         loadoutName = loadoutName,
         savedAt = time(),
         ignoredUpgradeSlots = existing and existing.ignoredUpgradeSlots,
+        equipmentSetName = existing and existing.equipmentSetName,
     }
+end
+
+function DB:CopyIgnoredUpgradeSlots(ignored)
+    if not ignored then
+        return nil
+    end
+
+    local copy = {}
+    for slot, value in pairs(ignored) do
+        copy[NormalizeInvSlot(slot)] = value
+    end
+
+    return copy
 end
 
 function DB:CopyGearSetToLoadout(specID, sourceConfigID, targetConfigID, targetLoadoutName)
@@ -450,10 +464,13 @@ function DB:CopyGearSetToLoadout(specID, sourceConfigID, targetConfigID, targetL
     end
 
     local specData = self:EnsureSpecTable(specID)
+    local sourceEntry = self:GetEntry(specID, sourceConfigID)
     specData[targetConfigID] = {
         gear = self:CopyGearSet(gear),
         loadoutName = targetLoadoutName,
         savedAt = time(),
+        ignoredUpgradeSlots = sourceEntry and self:CopyIgnoredUpgradeSlots(sourceEntry.ignoredUpgradeSlots),
+        equipmentSetName = sourceEntry and sourceEntry.equipmentSetName,
     }
     return true
 end

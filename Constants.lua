@@ -12,7 +12,9 @@ Constants.STARTER_BUILD_CONFIG_ID = (
 Constants.TALENT_UI_ADDON = "Blizzard_PlayerSpells"
 
 Constants.EQUIP_SLOT_DELAY = 0.15
-Constants.LOADOUT_APPLY_DELAY = 0.25
+Constants.LOADOUT_APPLY_DELAY = 0.3
+Constants.EQUIPMENT_SET_PREFIX = ""
+Constants.EQUIPMENT_SET_MAX_NAME = 16
 Constants.SAVE_RETRY_DELAY = 0.15
 Constants.OFFER_ADVANCE_DELAY = 0.05
 
