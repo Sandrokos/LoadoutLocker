@@ -26,7 +26,7 @@ end
 Catalog.VOIDSPIRE = R(
     "voidspire",
     "The Voidspire",
-    {},
+    { 2912 },
     { "Voidspire" },
     {
         B("averzian", "Imperator Averzian", 1, { "Averzian" }),
@@ -41,7 +41,7 @@ Catalog.VOIDSPIRE = R(
 Catalog.DREAMRIFT = R(
     "dreamrift",
     "Dreamrift",
-    {},
+    { 2939 },
     { "Dreamrift" },
     {
         B("chimaerus", "Chimaerus the Undreamt God", 1, { "Chimaerus", "Undreamt" }),
@@ -51,7 +51,7 @@ Catalog.DREAMRIFT = R(
 Catalog.MARCH_ON_QUEL_DANAS = R(
     "march_on_quel_danas",
     "March on Quel'Danas",
-    {},
+    { 2913 },
     { "Quel'Danas", "Quel Danas", "Sunwell" },
     {
         B("beloren", "Belo'ren, Child of Al'ar", 1, { "Belo'ren", "Beloren", "Al'ar" }),
@@ -59,8 +59,19 @@ Catalog.MARCH_ON_QUEL_DANAS = R(
     }
 )
 
+Catalog.SPOREFALL = R(
+    "sporefall",
+    "Sporefall",
+    { 2940 },
+    { "Sporefall", "Rotmire" },
+    {
+        B("rotmire", "Rotmire", 1, { "Rotmire" }),
+    }
+)
+
 Catalog.CURRENT_TIER = {
     Catalog.VOIDSPIRE,
     Catalog.DREAMRIFT,
     Catalog.MARCH_ON_QUEL_DANAS,
+    Catalog.SPOREFALL,
 }

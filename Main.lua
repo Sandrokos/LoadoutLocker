@@ -19,6 +19,7 @@ local function ShowHelp()
     Print("/locker sim dungeon - Preview the dungeon loadout prompt")
     Print("/locker sim raid [march] - Simulate being inside a raid")
     Print("/locker sim raid stop - End raid simulation")
+    Print("/locker debug raid - Print raid prompt diagnostics")
     Print("/locker help - Show this help")
     Print("Use /locker and open the Dungeons or Raids tab to assign loadouts.")
 end
@@ -44,6 +45,8 @@ local function HandleSlashCommand(msg)
         RaidUI.Simulate()
     elseif msg:match("^sim raid ") then
         RaidUI.Simulate(strtrim(msg:sub(10)))
+    elseif msg == "debug raid" then
+        RaidUI.Debug()
     elseif msg == "delete" or msg == "clear" then
         Gear.Delete()
     else

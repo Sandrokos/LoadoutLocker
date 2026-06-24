@@ -51,13 +51,77 @@ function Raids.GetMenuSections()
     }
 end
 
+local function ResolveFromZoneNames(instanceInfo, byKey)
+    for _, zoneName in ipairs(Instance.CollectZoneNames(instanceInfo)) do
+        local key, entity = Instance.MatchEntityName(zoneName, byKey)
+        if key then
+            return key, entity, zoneName
+        end
+    end
+end
+
+local function ResolveFromPlayerMap(byKey, byInstanceID)
+    if not C_Map or not C_Map.GetBestMapForUnit or not EJ_GetInstanceForMap or not EJ_GetInstanceInfo then
+        return nil
+    end
+
+    local uiMapID = C_Map.GetBestMapForUnit("player")
+    if not uiMapID then
+        return nil
+    end
+
+    local journalInstanceID = EJ_GetInstanceForMap(uiMapID)
+    if not journalInstanceID or journalInstanceID <= 0 then
+        return nil
+    end
+
+    local name, _, _, _, _, _, _, _, _, mapInstanceID, _, isRaid = EJ_GetInstanceInfo(journalInstanceID)
+    if not isRaid or not mapInstanceID then
+        return nil
+    end
+
+    return Instance.Resolve({
+        name = name,
+        instanceType = "raid",
+        instanceID = mapInstanceID,
+    }, "raid", byKey, byInstanceID)
+end
+
 function Raids.IsInRaidInstance(instanceInfo)
     instanceInfo = instanceInfo or Instance.GetCurrent()
-    return instanceInfo.instanceType == "raid"
+    if instanceInfo.instanceType == "raid" then
+        return true
+    end
+
+    if instanceInfo.inInstance and Raids.ResolveCurrent(instanceInfo) then
+        return true
+    end
+
+    return false
 end
 
 function Raids.ResolveCurrent(instanceInfo)
-    return Instance.Resolve(instanceInfo or Instance.GetCurrent(), "raid", byKey, byInstanceID)
+    instanceInfo = instanceInfo or Instance.GetCurrent()
+    local key, entity, name = Instance.Resolve(instanceInfo, "raid", byKey, byInstanceID)
+    if key then
+        return key, entity, name
+    end
+
+    if instanceInfo.inInstance or IsInInstance() then
+        key, entity, name = ResolveFromZoneNames(instanceInfo, byKey)
+        if key then
+            return key, entity, name
+        end
+
+        key, entity, name = ResolveFromPlayerMap(byKey, byInstanceID)
+        if key then
+            return key, entity, name
+        end
+    end
+
+    if instanceInfo.instanceType ~= "none" and instanceInfo.instanceType ~= "raid" then
+        return ResolveFromZoneNames(instanceInfo, byKey)
+    end
 end
 
 function Raids.FindBossByName(raid, encounterName)
