@@ -1,4 +1,16 @@
 package-as: LoadoutLocker
+wowi-archive-previous: no
+
+externals:
+  Libs/LibStub:
+    url: https://repos.wowace.com/wow/libstub/trunk
+    tag: 1.0
+  Libs/CallbackHandler-1.0:
+    url: https://repos.wowace.com/wow/callbackhandler/trunk/CallbackHandler-1.0
+    tag: latest
+  Libs/LibSharedMedia-3.0:
+    url: https://repos.wowace.com/wow/libsharedmedia-3-0/trunk/LibSharedMedia-3.0
+  Libs/LibDFramework-1.0: https://github.com/Tercioo/Details-Framework
 
 ignore:
   - LICENSE
@@ -9,3 +21,38 @@ ignore:
   - readme.md
   - CHANGELOG.md
   - changelog.md
+  - .github
+  - .vscode
+  - .luarc.json
+  - .luacheckrc
+
+  - Libs/LibSharedMedia-3.0/LibSharedMedia-3.0.toc
+  - Libs/LibSharedMedia-3.0/CHANGES.txt
+
+  - Libs/LibDFramework-1.0/LibDFramework-1.0.toc
+  - Libs/LibDFramework-1.0/CHANGES.txt
+  - Libs/LibDFramework-1.0/embeds.xml
+  - Libs/LibDFramework-1.0/packtable.tests.lua
+  - Libs/LibDFramework-1.0/addon.examples.lua
+  - Libs/LibDFramework-1.0/button.examples.lua
+  - Libs/LibDFramework-1.0/buildmenu.examples.lua
+  - Libs/LibDFramework-1.0/charts.examples.lua
+  - Libs/LibDFramework-1.0/containers.examples.lua
+  - Libs/LibDFramework-1.0/cooltip.examples.lua
+  - Libs/LibDFramework-1.0/dropdown.examples.lua
+  - Libs/LibDFramework-1.0/keybind.examples.lua
+  - Libs/LibDFramework-1.0/rounded_panel.examples.lua
+  - Libs/LibDFramework-1.0/scrollbox.examples.lua
+  - Libs/LibDFramework-1.0/scrollbox_exemples.lua
+  - Libs/LibDFramework-1.0/timeline.exemples.lua
+  - Libs/LibDFramework-1.0/addon_documentation.md
+  - Libs/LibDFramework-1.0/buildmenu_documentation.md
+  - Libs/LibDFramework-1.0/buildmenu_search_documentation.md
+  - Libs/LibDFramework-1.0/button_documentation.md
+  - Libs/LibDFramework-1.0/charts_documentation.md
+  - Libs/LibDFramework-1.0/containers_documentation.md
+  - Libs/LibDFramework-1.0/cooltip.md
+  - Libs/LibDFramework-1.0/DFPixelUtil_documentation.md
+  - Libs/LibDFramework-1.0/dropdown_documentation.md
+  - Libs/LibDFramework-1.0/ejournal_documentation.md
+  - Libs/LibDFramework-1.0/elapsedtime_documentation.md
