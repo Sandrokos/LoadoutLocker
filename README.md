@@ -15,7 +15,6 @@ Built for **World of Warcraft: Midnight** (Interface `120007`). Current version:
 - **Content loadout prompts** — assign default and per-content loadouts for dungeons, raids, delves, and PvP; get an in-game prompt when entering or when raid bosses need a different build
 - **In-game menu** — `/locker` opens General, Priority, Loadouts, Dungeons, Raids, Delves, and PvP tabs
 - **Loadout management** — overview table, copy gear sets between loadouts, delete saved sets, clear ignored upgrade slots
-- **Bug report** — built-in feedback form with debug info and a link to [GitHub Issues](https://github.com/Sandrokos/LoadoutLocker/issues)
 - **Options integration** — also listed under **Esc → Options → AddOns**
 
 ## Installation
@@ -36,7 +35,7 @@ Built for **World of Warcraft: Midnight** (Interface `120007`). Current version:
 /locker save
 ```
 
-Re-saving updates the gear set for that loadout. The button label changes to **Update Gear** when a set already exists. LoadoutLocker also keeps the matching Blizzard equipment set in sync.
+Re-saving updates the gear set for that loadout. LoadoutLocker also keeps the matching Blizzard equipment set in sync.
 
 ### Switch loadouts
 
@@ -71,24 +70,6 @@ Toggle each prompt type on the **General** tab:
 - Delves
 - PvP
 
-### Menu and settings
-
-| Command | Description |
-|---------|-------------|
-| `/locker` | Open the LoadoutLocker menu |
-
-| Tab | Purpose |
-|-----|---------|
-| **General** | Toggle upgrade and content prompts; command reference |
-| **Priority** | Tertiary stat order used to break upgrade ties |
-| **Loadouts** | Overview, delete/copy gear sets, manage ignored upgrade slots |
-| **Dungeons** | Default and per-dungeon loadout assignments |
-| **Raids** | Default and per-boss loadout assignments |
-| **Delves** | Default and per-delve loadout assignments |
-| **PvP** | Default and per-mode loadout assignments |
-
-Use **Bug Report** at the bottom of the sidebar to send feedback or copy debug info for a GitHub issue.
-
 ### Slash commands
 
 | Command | Description |
@@ -97,20 +78,8 @@ Use **Bug Report** at the bottom of the sidebar to send feedback or copy debug i
 | `/locker list` | List saved gear sets for your current specialization |
 | `/locker delete` | Remove the saved gear set for the active talent loadout |
 | `/locker scan` | Check bags for better versions of saved loadout items |
-| `/locker debug` | Open bug report with debug info |
 | `/locker help` | Show command help |
 
-**Testing prompts** (development / preview):
-
-| Command | Description |
-|---------|-------------|
-| `/locker sim dungeon` | Preview the dungeon loadout prompt |
-| `/locker sim delve` | Preview the delve loadout prompt |
-| `/locker sim pvp [arena\|battleground]` | Preview the PvP loadout prompt |
-| `/locker sim raid [march]` | Simulate being inside a raid |
-| `/locker sim raid stop` | End raid simulation |
-
-`/loadoutlocker` is an alias for `/locker`. `clear` works as an alias for `delete`.
 
 ## Limitations
 
