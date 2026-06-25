@@ -7,3 +7,5 @@ ignore:
   - license.*
   - README.md
   - readme.md
+  - CHANGELOG.md
+  - changelog.md
