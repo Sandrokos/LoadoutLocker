@@ -84,7 +84,7 @@ local function ResolveFromPlayerMap(raidsByKey, raidsByInstanceID)
         name = name,
         instanceType = "raid",
         instanceID = mapInstanceID,
-    }, "raid", byKey, byInstanceID)
+    }, "raid", raidsByKey, raidsByInstanceID)
 end
 
 function Raids.IsInRaidInstance(instanceInfo)
