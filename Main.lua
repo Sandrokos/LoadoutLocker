@@ -23,7 +23,7 @@ local function ShowHelp()
     Print("/locker sim pvp [arena|battleground] - Preview the PvP loadout prompt")
     Print("/locker sim raid [march] - Simulate being inside a raid")
     Print("/locker sim raid stop - End raid simulation")
-    Print("/locker debug raid - Print raid prompt diagnostics")
+    Print("/locker debug - Open bug report with debug info")
     Print("/locker help - Show this help")
     Print("Use /locker and open the Dungeons, Raids, Delves, or PvP tab to assign loadouts.")
 end
@@ -58,8 +58,8 @@ local function HandleSlashCommand(msg)
         RaidUI.Simulate()
     elseif msg:match("^sim raid ") then
         RaidUI.Simulate(strtrim(msg:sub(10)))
-    elseif msg == "debug raid" then
-        RaidUI.Debug()
+    elseif msg == "debug" or msg == "debug raid" then
+        LoadoutLocker.BugReportUI.ShowDebugOutput()
     elseif msg == "delete" or msg == "clear" then
         Gear.Delete()
     else
@@ -82,6 +82,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" and arg1 == ADDON_NAME then
         DB:Initialize()
         Menu.RegisterWithSettings()
+        LoadoutLocker.BugReportUI.InstallErrorCapture()
     elseif (event == "PLAYER_LOGIN" or event == "TRAIT_CONFIG_LIST_UPDATED") and not loginSynced then
         if LoadoutLocker.Loadout.RecordCurrent() then
             loginSynced = true

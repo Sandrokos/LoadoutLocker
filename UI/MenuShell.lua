@@ -179,21 +179,8 @@ function Shell:Ensure()
     frame.title:SetText("LoadoutLocker")
     frame.title:SetTextColor(unpack(Style.title))
 
-    local close = CreateFrame("Button", nil, frame)
-    close:SetSize(20, 20)
-    close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -14, -12)
-    close:SetScript("OnClick", function()
+    Widgets.CreateCloseButton(frame, function()
         frame:Hide()
-    end)
-    close.label = close:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    close.label:SetPoint("CENTER")
-    close.label:SetText("X")
-    close.label:SetTextColor(0.7, 0.65, 0.55)
-    close:SetScript("OnEnter", function()
-        close.label:SetTextColor(1, 0.88, 0.55)
-    end)
-    close:SetScript("OnLeave", function()
-        close.label:SetTextColor(0.7, 0.65, 0.55)
     end)
 
     local sidebar = CreateFrame("Frame", nil, frame, "BackdropTemplate")
@@ -232,6 +219,12 @@ function Shell:Ensure()
         tabFrame:Hide()
         self.tabContents[tab.id] = tabFrame
     end
+
+    local bugReportButton = Widgets.CreateSidebarButton(sidebar, "Bug Report", SIDEBAR_WIDTH - 10, 24)
+    bugReportButton:SetPoint("BOTTOMLEFT", sidebar, "BOTTOMLEFT", 5, 6)
+    bugReportButton:SetScript("OnClick", function()
+        LoadoutLocker.BugReportUI.Show()
+    end)
 
     self.frame = frame
     self.activeTab = nil

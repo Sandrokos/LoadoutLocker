@@ -12,6 +12,8 @@ Widgets.Style = {
     title = { 1, 0.82, 0.35 },
     panelBg = { 0.12, 0.10, 0.09, 0.75 },
     panelBorder = { 0.48, 0.36, 0.14, 0.40 },
+    codeBg = { 0.08, 0.07, 0.06, 0.95 },
+    codeBorder = { 0.35, 0.28, 0.18, 0.50 },
 }
 
 local Style = Widgets.Style
@@ -29,6 +31,42 @@ local SCROLLBAR_WIDTH = 26
 Widgets.SCROLLBAR_WIDTH = SCROLLBAR_WIDTH
 local SCROLL_RIGHT_INSET = SCROLLBAR_WIDTH + 4
 local PANEL_INSET_X = 4
+
+function Widgets.CreateCloseButton(parent, onClick)
+    local close = CreateFrame("Button", nil, parent)
+    close:SetSize(20, 20)
+    close:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -14, -12)
+    close:SetScript("OnClick", onClick)
+    close.label = close:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    close.label:SetPoint("CENTER")
+    close.label:SetText("X")
+    close.label:SetTextColor(0.7, 0.65, 0.55)
+    close:SetScript("OnEnter", function()
+        close.label:SetTextColor(1, 0.88, 0.55)
+    end)
+    close:SetScript("OnLeave", function()
+        close.label:SetTextColor(0.7, 0.65, 0.55)
+    end)
+    return close
+end
+
+function Widgets.ConfigureReadOnlyEditBox(editBox, transparentBackground)
+    editBox:SetScript("OnChar", function()
+    end)
+    if not transparentBackground then
+        return
+    end
+    if editBox.Left then
+        editBox.Left:SetAlpha(0)
+    end
+    if editBox.Middle then
+        editBox.Middle:SetAlpha(0)
+    end
+    if editBox.Right then
+        editBox.Right:SetAlpha(0)
+    end
+end
+
 local PANEL_PAD_TOP = 6
 local PANEL_PAD_BOTTOM = 6
 local DROPDOWN_MENU_STRATA = "FULLSCREEN_DIALOG"

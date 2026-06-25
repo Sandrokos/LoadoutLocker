@@ -12,7 +12,6 @@ local PromptUtils = LoadoutLocker.PromptUtils
 local Print = LoadoutLocker.Print
 
 local promptFrame
-local debugFrame
 local choiceButtons = {}
 local dismissedRaidKey
 local lastRaidKey
@@ -387,137 +386,45 @@ function RaidUI.Simulate(requestedRaidKey)
     Print("Simulating raid: " .. raid.name .. " (/locker sim raid stop to end).")
 end
 
-local function EnsureDebugFrame()
-    if debugFrame then
-        return debugFrame
-    end
-
-    local frame = CreateFrame("Frame", "LoadoutLockerRaidDebugFrame", UIParent, "BackdropTemplate")
-    frame:SetSize(460, 380)
-    frame:SetPoint("CENTER")
-    frame:SetFrameStrata("DIALOG")
-    frame:SetFrameLevel(300)
-    frame:SetMovable(true)
-    frame:EnableMouse(true)
-    frame:RegisterForDrag("LeftButton")
-    frame:SetScript("OnDragStart", frame.StartMoving)
-    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
-    frame:SetBackdrop(C.DIALOG_BACKDROP)
-    frame:Hide()
-
-    local title = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    title:SetPoint("TOP", frame, "TOP", 0, -14)
-    title:SetText("Raid Debug")
-
-    local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
-    close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -4, -4)
-    close:SetScript("OnClick", function()
-        frame:Hide()
-    end)
-
-    local scroll = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 18, -40)
-    scroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -36, 18)
-
-    local editBox = CreateFrame("EditBox", nil, scroll)
-    editBox:SetMultiLine(true)
-    editBox:SetAutoFocus(false)
-    editBox:EnableMouse(true)
-    editBox:SetFontObject("GameFontHighlightSmall")
-    editBox:SetWidth(390)
-    editBox:SetJustifyH("LEFT")
-    editBox:SetScript("OnEscapePressed", function()
-        frame:Hide()
-    end)
-    scroll:SetScrollChild(editBox)
-
-    frame.editBox = editBox
-    frame.scroll = scroll
-    debugFrame = frame
-    return frame
-end
-
-local function ShowDebugText(text)
-    local frame = EnsureDebugFrame()
-    local editBox = frame.editBox
-
-    editBox:SetText(text)
-    local _, fontSize = editBox:GetFont()
-    fontSize = fontSize or 12
-    editBox:SetHeight(math.max(320, (editBox:GetNumLines() + 1) * (fontSize + 2)))
-
-    if frame.scroll.UpdateScrollChildRect then
-        frame.scroll:UpdateScrollChildRect()
-    end
-    frame.scroll:SetVerticalScroll(0)
-    frame:Show()
-end
-
-local function BuildRaidDebugText()
-    local instanceInfo = Instance.GetCurrent()
+function RaidUI.AppendDebugLines(lines, instanceInfo, specID)
     local inRaid = Raids.IsInRaidInstance(instanceInfo)
     local raidKey, raid = Raids.ResolveCurrent(instanceInfo)
-    local specID = Loadout.GetSpecID()
-    local currentConfigID = specID and Loadout.GetLoadoutConfigID(specID) or nil
-    local lines = {
-        "Raid debug",
-        "",
-        "inInstance: " .. tostring(instanceInfo.inInstance),
-        "instanceType: " .. tostring(instanceInfo.instanceType),
-        "instanceName: " .. tostring(instanceInfo.name),
-        "instanceID: " .. tostring(instanceInfo.instanceID),
-        "difficultyID: " .. tostring(instanceInfo.difficultyID),
-        "zone: " .. tostring(GetZoneText()) .. " / " .. tostring(GetSubZoneText()),
-        "realZone: " .. tostring(GetRealZoneText()),
-        "inRaid: " .. tostring(inRaid),
-        "resolvedRaid: " .. tostring(raidKey),
-        "promptsEnabled: " .. tostring(DB:AreRaidPromptsEnabled()),
-        "specID: " .. tostring(specID),
-        "currentConfigID: " .. tostring(currentConfigID),
-        "currentLoadout: " .. tostring(currentConfigID and Loadout.GetLoadoutName(currentConfigID)),
-        "defaultRaidConfigID: " .. tostring(specID and DB:GetRaidDefaultConfigID(specID)),
-        "dismissedRaidKey: " .. tostring(dismissedRaidKey),
-    }
 
-    local zoneNames = Instance.CollectZoneNames(instanceInfo)
-    if #zoneNames > 0 then
-        lines[#lines + 1] = ""
-        lines[#lines + 1] = "zoneNames:"
-        for _, zoneName in ipairs(zoneNames) do
-            lines[#lines + 1] = "  " .. zoneName
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = "--- Raids ---"
+    lines[#lines + 1] = "active: " .. tostring(inRaid)
+    lines[#lines + 1] = "resolvedKey: " .. tostring(raidKey)
+    lines[#lines + 1] = "resolvedName: " .. tostring(raid and raid.name)
+    lines[#lines + 1] = "promptsEnabled: " .. tostring(DB:AreRaidPromptsEnabled())
+    local defaultConfigID = specID and DB:GetRaidDefaultConfigID(specID)
+    lines[#lines + 1] = "defaultConfigID: " .. tostring(defaultConfigID)
+        .. " (" .. tostring(defaultConfigID and Loadout.GetLoadoutName(defaultConfigID)) .. ")"
+    lines[#lines + 1] = "dismissedRaidKey: " .. tostring(dismissedRaidKey)
+
+    if not raidKey or not raid or not specID then
+        return
+    end
+
+    local killStates = Raids.GetBossKillStates(raid, instanceInfo)
+    local bosses = GetPromptBosses(raid, killStates)
+    local choices = BuildGroupedPromptChoices(specID, raidKey, raid, bosses)
+
+    lines[#lines + 1] = "promptBosses: " .. tostring(#bosses)
+    lines[#lines + 1] = "choices: " .. tostring(choices and #choices or 0)
+
+    if choices then
+        for index, choice in ipairs(choices) do
+            lines[#lines + 1] = "  choice " .. index .. ": " .. tostring(choice.configID)
+                .. " (" .. tostring(Loadout.GetLoadoutName(choice.configID)) .. ")"
         end
     end
 
-    if raidKey and raid and specID then
-        local killStates = Raids.GetBossKillStates(raid, instanceInfo)
-        local bosses = GetPromptBosses(raid, killStates)
-        local choices = BuildGroupedPromptChoices(specID, raidKey, raid, bosses)
-
-        lines[#lines + 1] = ""
-        lines[#lines + 1] = "promptBosses: " .. tostring(#bosses)
-        lines[#lines + 1] = "choices: " .. tostring(choices and #choices or 0)
-
-        if choices then
-            for index, choice in ipairs(choices) do
-                lines[#lines + 1] = "  choice " .. index .. ": " .. tostring(choice.configID)
-                    .. " (" .. tostring(Loadout.GetLoadoutName(choice.configID)) .. ")"
-            end
-        end
-
-        lines[#lines + 1] = ""
-        lines[#lines + 1] = "boss assignments:"
-        for _, boss in ipairs(bosses) do
-            local configID = DB:GetRaidBossConfigID(specID, raidKey, boss.key)
-            lines[#lines + 1] = "  " .. boss.key .. " -> " .. tostring(configID)
-                .. " (" .. tostring(configID and Loadout.GetLoadoutName(configID)) .. ")"
-        end
+    lines[#lines + 1] = "boss assignments:"
+    for _, boss in ipairs(bosses) do
+        local configID = DB:GetRaidBossConfigID(specID, raidKey, boss.key)
+        lines[#lines + 1] = "  " .. boss.key .. " -> " .. tostring(configID)
+            .. " (" .. tostring(configID and Loadout.GetLoadoutName(configID)) .. ")"
     end
-
-    return table.concat(lines, "\n")
-end
-
-function RaidUI.Debug()
-    ShowDebugText(BuildRaidDebugText())
 end
 
 local ENTER_EVALUATE_DELAYS = { 0.1, 0.5, 1.0, 2.0 }
