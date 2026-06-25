@@ -1,0 +1,8 @@
+# Luacheck
+.luacheck-cache
+luacheckrc.txt
+
+# External libraries (fetched at package time via .pkgmeta)
+Libs/LibStub/
+Libs/LibSharedMedia-3.0/
+Libs/LibDFramework-1.0/
