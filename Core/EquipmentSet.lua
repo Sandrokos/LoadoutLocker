@@ -46,7 +46,7 @@ local function GetSpecIcon(specID)
         return nil
     end
 
-    local id, _, _, icon
+    local id, icon
     if GetSpecializationInfoForSpecID then
         id, _, _, icon = GetSpecializationInfoForSpecID(specID)
     elseif GetSpecializationInfoByID then

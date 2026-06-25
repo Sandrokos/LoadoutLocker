@@ -187,7 +187,7 @@ local function TracksAreSameFamily(trackA, trackB)
         and GetTrackLabel(trackA) == GetTrackLabel(trackB)
 end
 
-function Upgrades.GetItemIcon(itemID, itemLink)
+function Upgrades.GetItemIcon(itemID, _itemLink)
     if itemID and C_Item.GetItemIconByID then
         return C_Item.GetItemIconByID(itemID)
     end
@@ -348,7 +348,6 @@ local function ScanTooltipForUpgradeTrack(itemLink)
 end
 
 local function GetUpgradeTrack(itemLink, itemID, itemLocation)
-    local upgradeInfo
     local linkCandidates = Items.GetItemInfoCandidates(itemLink, itemID)
 
     local function trackFromUpgradeInfo(info)
@@ -360,7 +359,6 @@ local function GetUpgradeTrack(itemLink, itemID, itemLocation)
     if itemLocation and C_Item.GetItemUpgradeInfo then
         local ok, info = pcall(C_Item.GetItemUpgradeInfo, itemLocation)
         if ok and info then
-            upgradeInfo = info
             local track = trackFromUpgradeInfo(info)
             if track then
                 return track
@@ -372,7 +370,6 @@ local function GetUpgradeTrack(itemLink, itemID, itemLocation)
         for _, itemInfo in ipairs(linkCandidates) do
             local ok, info = pcall(C_Item.GetItemUpgradeInfo, itemInfo)
             if ok and info then
-                upgradeInfo = info
                 local track = trackFromUpgradeInfo(info)
                 if track then
                     return track
@@ -384,7 +381,6 @@ local function GetUpgradeTrack(itemLink, itemID, itemLocation)
         if #linkCandidates == 0 and type(itemID) == "number" and itemID > 0 then
             local ok, info = pcall(C_Item.GetItemUpgradeInfo, itemID)
             if ok and info then
-                upgradeInfo = info
                 local track = trackFromUpgradeInfo(info)
                 if track then
                     return track
@@ -599,41 +595,41 @@ local function BuildItemProfile(itemIDOrLocation, itemLink, bag, slot, invSlot)
     end
 
     local itemID = location.itemID
-    local itemLink = location.itemLink
-    local bag = location.bag
-    local slot = location.slot
-    local invSlot = location.invSlot
+    local resolvedLink = location.itemLink
+    local resolvedBag = location.bag
+    local resolvedSlot = location.slot
+    local resolvedInvSlot = location.invSlot
     local itemLocation
-    if bag and slot and ItemLocation and ItemLocation.CreateFromBagAndSlot then
-        itemLocation = ItemLocation:CreateFromBagAndSlot(bag, slot)
+    if resolvedBag and resolvedSlot and ItemLocation and ItemLocation.CreateFromBagAndSlot then
+        itemLocation = ItemLocation:CreateFromBagAndSlot(resolvedBag, resolvedSlot)
         if itemLocation and not itemLocation:IsValid() then
             itemLocation = nil
         end
-    elseif invSlot and ItemLocation and ItemLocation.CreateFromEquipmentSlot then
-        itemLocation = ItemLocation:CreateFromEquipmentSlot(invSlot)
+    elseif resolvedInvSlot and ItemLocation and ItemLocation.CreateFromEquipmentSlot then
+        itemLocation = ItemLocation:CreateFromEquipmentSlot(resolvedInvSlot)
         if itemLocation and not itemLocation:IsValid() then
             itemLocation = nil
         end
     end
 
-    if not itemLink and itemLocation and C_Item.GetItemLink then
-        itemLink = C_Item.GetItemLink(itemLocation)
+    if not resolvedLink and itemLocation and C_Item.GetItemLink then
+        resolvedLink = C_Item.GetItemLink(itemLocation)
     end
 
-    itemLink = Items.ResolveItemLink(itemID, itemLink)
+    resolvedLink = Items.ResolveItemLink(itemID, resolvedLink)
 
-    local tertiary = GetTertiaryStats(itemLink, itemID, itemLocation)
-    local trackString = GetUpgradeTrack(itemLink, itemID, itemLocation)
+    local tertiary = GetTertiaryStats(resolvedLink, itemID, itemLocation)
+    local trackString = GetUpgradeTrack(resolvedLink, itemID, itemLocation)
 
     local profile = {
         itemID = itemID,
-        itemLink = itemLink,
-        bag = bag,
-        slot = slot,
-        invSlot = invSlot,
-        itemLevel = Items.GetItemLevel(itemLink, itemLocation),
+        itemLink = resolvedLink,
+        bag = resolvedBag,
+        slot = resolvedSlot,
+        invSlot = resolvedInvSlot,
+        itemLevel = Items.GetItemLevel(resolvedLink, itemLocation),
         trackString = trackString,
-        sockets = Items.GetGemSlotCount(itemLink, itemID),
+        sockets = Items.GetGemSlotCount(resolvedLink, itemID),
         avoidance = tertiary.avoidance,
         leech = tertiary.leech,
         speed = tertiary.speed,
@@ -769,16 +765,19 @@ local function FindReferenceProfile(savedItemID, invSlot, savedItemLink, gearEnt
     if not profile and playerProfiles then
         local savedLevel = Items.GetSavedItemLevel(gearEntry)
         for _, itemProfile in ipairs(playerProfiles) do
-            if not Items.MatchesFamily(savedItemID, itemProfile.itemID) then
-            elseif invSlot and itemProfile.invSlot == invSlot
-                and not ProfileMatchesSavedEntry(itemProfile.itemLink, gearEntry) then
-            elseif ProfileMatchesSavedEntry(itemProfile.itemLink, gearEntry) then
-                profile = itemProfile
-                break
-            elseif savedLevel > 0
-                and (itemProfile.itemLevel == 0 or itemProfile.itemLevel == savedLevel) then
-                profile = itemProfile
-                break
+            if Items.MatchesFamily(savedItemID, itemProfile.itemID) then
+                local wrongSlot = invSlot and itemProfile.invSlot == invSlot
+                    and not ProfileMatchesSavedEntry(itemProfile.itemLink, gearEntry)
+                if not wrongSlot then
+                    if ProfileMatchesSavedEntry(itemProfile.itemLink, gearEntry) then
+                        profile = itemProfile
+                        break
+                    elseif savedLevel > 0
+                        and (itemProfile.itemLevel == 0 or itemProfile.itemLevel == savedLevel) then
+                        profile = itemProfile
+                        break
+                    end
+                end
             end
         end
     elseif not profile then

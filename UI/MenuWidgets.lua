@@ -615,7 +615,7 @@ function Widgets.AddLoadoutOverviewTable(builder, rows)
     local separatorGap = 12
     local bottomGap = 8
 
-    local innerY = 0
+    local innerY
     if not rows or #rows == 0 then
         innerY = ROW_HEIGHT
     else

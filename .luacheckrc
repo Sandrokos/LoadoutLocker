@@ -1,5 +1,5 @@
 std = "lua51"
-max_line_length = 120
+max_line_length = false
 codes = true
 
 exclude_files = {
@@ -70,7 +70,9 @@ globals = {
 	"ClearCursor",
 	"EJ_GetInstanceForMap",
 	"EJ_GetInstanceInfo",
+	"GameTooltip",
 	"GetAddOnMetadata",
+	"GetInstanceInfo",
 	"GetInventoryItemID",
 	"GetInventoryItemLink",
 	"GetItemInfo",
@@ -93,5 +95,6 @@ globals = {
 
 ignore = {
 	"212/self",
+	"212/_",
 	"1/[A-Z][A-Z][A-Z0-9_]+",
 }

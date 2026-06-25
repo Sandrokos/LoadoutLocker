@@ -51,16 +51,16 @@ function Raids.GetMenuSections()
     }
 end
 
-local function ResolveFromZoneNames(instanceInfo, byKey)
+local function ResolveFromZoneNames(instanceInfo, raidsByKey)
     for _, zoneName in ipairs(Instance.CollectZoneNames(instanceInfo)) do
-        local key, entity = Instance.MatchEntityName(zoneName, byKey)
+        local key, entity = Instance.MatchEntityName(zoneName, raidsByKey)
         if key then
             return key, entity, zoneName
         end
     end
 end
 
-local function ResolveFromPlayerMap(byKey, byInstanceID)
+local function ResolveFromPlayerMap(raidsByKey, raidsByInstanceID)
     if not C_Map or not C_Map.GetBestMapForUnit or not EJ_GetInstanceForMap or not EJ_GetInstanceInfo then
         return nil
     end

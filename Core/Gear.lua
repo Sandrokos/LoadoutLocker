@@ -779,7 +779,9 @@ local function EquipSlot(invSlot, gearEntry, usedLocations, bagState)
         end
     end
 
-    local sourceType, arg1, arg2, locationKey = FindItemOnPlayer(itemID, itemLink, invSlot, usedLocations, gearEntry, bagState)
+    local sourceType, arg1, arg2, locationKey = FindItemOnPlayer(
+        itemID, itemLink, invSlot, usedLocations, gearEntry, bagState
+    )
     if not sourceType then
         return false
     end
@@ -804,9 +806,7 @@ local function PrintGearDiffFailures(diff, reported)
 
     for _, change in ipairs(diff.equip) do
         local itemID = ResolveGearEntry(change.entry)
-        if itemID and GetInventoryItemID("player", change.invSlot) == itemID then
-            -- Correct item is equipped; link/modifier checks can lag after swaps.
-        else
+        if not itemID or GetInventoryItemID("player", change.invSlot) ~= itemID then
             ReportSwapIssue(
                 reported,
                 "missing:" .. tostring(itemID),
@@ -1241,7 +1241,6 @@ local function RunUpgradeOnlyPipeline(specID, configID, gearSet, options)
     end
 
     Gear.NormalizeGearSetKeys(gearSet)
-    local workingGearSet = BuildWorkingGearSet(gearSet)
     RunUpgradeStep(specID, configID, gearSet, options, afterUpgrades)
 end
 
@@ -1261,7 +1260,7 @@ local function RunLoadoutGearPipeline(specID, configID, gearSet, options)
         end
     end
 
-    local function afterValidation(success, workingGearSet, changed)
+    local function afterValidation(success, changed)
         finish(success, changed)
     end
 
@@ -1271,12 +1270,11 @@ local function RunLoadoutGearPipeline(specID, configID, gearSet, options)
         end
 
         ValidateEquippedGear(workingGearSet, function(valid)
-            afterValidation(valid, workingGearSet, changed)
+            afterValidation(valid, changed)
         end)
     end
 
     Gear.NormalizeGearSetKeys(gearSet)
-    local workingGearSet = BuildWorkingGearSet(gearSet)
 
     local function afterEquipmentSet()
         RunUpgradeStep(specID, configID, gearSet, options, afterUpgrades)

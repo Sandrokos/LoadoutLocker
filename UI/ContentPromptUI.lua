@@ -4,7 +4,6 @@ local ContentPromptUI = {}
 LoadoutLocker.ContentPromptUI = ContentPromptUI
 
 function ContentPromptUI.Create(config)
-    local DB = LoadoutLocker.DB
     local Instance = LoadoutLocker.Instance
     local Loadout = LoadoutLocker.Loadout
     local PromptUtils = LoadoutLocker.PromptUtils
