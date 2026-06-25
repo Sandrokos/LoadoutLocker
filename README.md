@@ -1,8 +1,8 @@
 # LoadoutLocker
 
-Save your equipped gear to each talent loadout and automatically swap when you switch builds.
+Save your equipped gear to each talent loadout and automatically swap when you switch builds. Assign loadouts to dungeons, raids, delves, and PvP content and get prompted when it is time to switch.
 
-Built for **World of Warcraft: Midnight** (Interface `120007`). Current version: **1.6.0**.
+Built for **World of Warcraft: Midnight** (Interface `120007`). Current version: **1.9.0**.
 
 ## Features
 
@@ -10,9 +10,12 @@ Built for **World of Warcraft: Midnight** (Interface `120007`). Current version:
 - **Auto-equip on loadout change** — switching loadouts applies the linked gear set after talents commit
 - **Smart swapping** — two-phase unequip/equip handles embellished items and slot conflicts
 - **Talent UI button** — Save Gear button below the loadout dropdown on the talent panel
+- **Equipment Manager sync** — saved gear is mirrored to a Blizzard equipment set (named after the loadout) so you can equip from the character panel too
 - **Upgrade scan** — when applying a loadout, prompts if a same-name bag item is better (track, ilvl, or tertiary stats)
-- **In-game menu** — `/locker` opens Help, Priority, and Loadouts tabs
-- **Loadout management** — copy gear sets between loadouts, delete saved sets, clear ignored upgrade slots
+- **Content loadout prompts** — assign default and per-content loadouts for dungeons, raids, delves, and PvP; get an in-game prompt when entering or when raid bosses need a different build
+- **In-game menu** — `/locker` opens General, Priority, Loadouts, Dungeons, Raids, Delves, and PvP tabs
+- **Loadout management** — overview table, copy gear sets between loadouts, delete saved sets, clear ignored upgrade slots
+- **Bug report** — built-in feedback form with debug info and a link to [GitHub Issues](https://github.com/Sandrokos/LoadoutLocker/issues)
 - **Options integration** — also listed under **Esc → Options → AddOns**
 
 ## Installation
@@ -33,7 +36,7 @@ Built for **World of Warcraft: Midnight** (Interface `120007`). Current version:
 /locker save
 ```
 
-Re-saving updates the gear set for that loadout. The button label changes to **Update Gear** when a set already exists.
+Re-saving updates the gear set for that loadout. The button label changes to **Update Gear** when a set already exists. LoadoutLocker also keeps the matching Blizzard equipment set in sync.
 
 ### Switch loadouts
 
@@ -51,7 +54,22 @@ When you switch loadouts (or run `/locker scan`), LoadoutLocker checks your bags
 
 Accepting an upgrade updates the saved loadout gear and equips it.
 
-Use **Do not ask again** on a prompt to ignore that equipment slot for the current loadout. Manage ignored slots on the **Loadouts** tab, or turn off upgrade prompts entirely on the **Priority** tab.
+Use **Do not ask again** on a prompt to ignore that equipment slot for the current loadout. Manage ignored slots on the **Loadouts** tab. Turn upgrade prompts on or off on the **General** tab.
+
+### Content loadout prompts
+
+Use the **Dungeons**, **Raids**, **Delves**, and **PvP** tabs to pick a default talent loadout for each activity type, then optionally override individual dungeons, bosses, delves, or PvP modes.
+
+When you enter matching content (or after a raid boss kill, when remaining bosses need different loadouts), LoadoutLocker shows a prompt to switch loadouts. Dismiss a prompt for the current visit with **Not now**; it will not appear again until you leave and re-enter.
+
+Raid prompts respect your lockout progress — bosses you have already killed are skipped.
+
+Toggle each prompt type on the **General** tab:
+
+- Dungeons
+- Raids (entering and after boss kills)
+- Delves
+- PvP
 
 ### Menu and settings
 
@@ -59,9 +77,17 @@ Use **Do not ask again** on a prompt to ignore that equipment slot for the curre
 |---------|-------------|
 | `/locker` | Open the LoadoutLocker menu |
 
-The **Priority** tab controls whether upgrade prompts run on loadout change and the order tertiary stats break ties.
+| Tab | Purpose |
+|-----|---------|
+| **General** | Toggle upgrade and content prompts; command reference |
+| **Priority** | Tertiary stat order used to break upgrade ties |
+| **Loadouts** | Overview, delete/copy gear sets, manage ignored upgrade slots |
+| **Dungeons** | Default and per-dungeon loadout assignments |
+| **Raids** | Default and per-boss loadout assignments |
+| **Delves** | Default and per-delve loadout assignments |
+| **PvP** | Default and per-mode loadout assignments |
 
-The **Loadouts** tab lets you delete a saved gear set, copy one loadout's gear to another, and clear ignored upgrade slots.
+Use **Bug Report** at the bottom of the sidebar to send feedback or copy debug info for a GitHub issue.
 
 ### Slash commands
 
@@ -71,7 +97,18 @@ The **Loadouts** tab lets you delete a saved gear set, copy one loadout's gear t
 | `/locker list` | List saved gear sets for your current specialization |
 | `/locker delete` | Remove the saved gear set for the active talent loadout |
 | `/locker scan` | Check bags for better versions of saved loadout items |
+| `/locker debug` | Open bug report with debug info |
 | `/locker help` | Show command help |
+
+**Testing prompts** (development / preview):
+
+| Command | Description |
+|---------|-------------|
+| `/locker sim dungeon` | Preview the dungeon loadout prompt |
+| `/locker sim delve` | Preview the delve loadout prompt |
+| `/locker sim pvp [arena\|battleground]` | Preview the PvP loadout prompt |
+| `/locker sim raid [march]` | Simulate being inside a raid |
+| `/locker sim raid stop` | End raid simulation |
 
 `/loadoutlocker` is an alias for `/locker`. `clear` works as an alias for `delete`.
 
@@ -81,3 +118,4 @@ The **Loadouts** tab lets you delete a saved gear set, copy one loadout's gear t
 - Requires enough bag space for gear swaps that need items moved out of equipment slots
 - Missing items are skipped with a chat message; other slots still swap
 - Gear swaps do not run in combat — the swap is cancelled if combat starts mid-swap
+- Blizzard equipment sets share a game-wide limit; LoadoutLocker warns if it cannot create a set
