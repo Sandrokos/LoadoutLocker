@@ -78,6 +78,7 @@ Catalog.EXPANSION_GROUPS = {
             D("the_azure_vault", "The Azure Vault", "Dragonflight", { 2515, 2590 }),
             D("uldaman_legacy", "Uldaman: Legacy of Tyr", "Dragonflight", { 2451 }),
             D("ruby_life_pools", "Ruby Life Pools", "Dragonflight", { 2521 }),
+            D("algethar_academy", "Algeth'ar Academy", "Dragonflight", { 2526 }, { "Algeth" }),
             D("halls_of_infusion", "Halls of Infusion", "Dragonflight", { 2527 }),
             D("dawn_of_the_infinite", "Dawn of the Infinite", "Dragonflight", { 2579 }),
         },
@@ -124,6 +125,7 @@ Catalog.EXPANSION_GROUPS = {
             D("the_arcway", "The Arcway", "Legion", { 1516 }),
             D("return_to_karazhan", "Return to Karazhan", "Legion", { 1651 }),
             D("cathedral_of_eternal_night", "Cathedral of Eternal Night", "Legion", { 1677 }),
+            D("seat_of_the_triumvirate", "Seat of the Triumvirate", "Legion", { 1753 }, { "Triumvirate" }),
         },
     },
     {
@@ -134,6 +136,7 @@ Catalog.EXPANSION_GROUPS = {
             D("auchindoun", "Auchindoun", "Warlords of Draenor", { 1182 }),
             D("iron_docks", "Iron Docks", "Warlords of Draenor", { 1195 }),
             D("grimrail_depot", "Grimrail Depot", "Warlords of Draenor", { 1208 }),
+            D("skyreach", "Skyreach", "Warlords of Draenor", { 1209 }, { "Skyreach" }),
             D("the_everbloom", "The Everbloom", "Warlords of Draenor", { 1279 }),
             D("upper_blackrock_spire", "Upper Blackrock Spire", "Warlords of Draenor", { 1358 }),
         },
@@ -153,6 +156,7 @@ Catalog.EXPANSION_GROUPS = {
             D("ahnkahet", "Ahn'kahet: The Old Kingdom", "Wrath of the Lich King", { 619 }),
             D("forge_of_souls", "The Forge of Souls", "Wrath of the Lich King", { 632 }),
             D("halls_of_reflection", "Halls of Reflection", "Wrath of the Lich King", { 668 }),
+            D("pit_of_saron", "Pit of Saron", "Wrath of the Lich King", { 658 }, { "Pit of Saron" }),
         },
     },
     {

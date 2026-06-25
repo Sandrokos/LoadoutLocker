@@ -19,7 +19,28 @@ local CONTENT_HEIGHT = FRAME_HEIGHT - FRAME_INSET_TOP - FRAME_INSET_BOTTOM
 local SUB_BAR_ROW_HEIGHT = 28
 local SUB_BAR_ROW_GAP = 4
 local SUB_BAR_HEIGHT = SUB_BAR_ROW_HEIGHT * 2 + SUB_BAR_ROW_GAP
-local DUNGEON_HEADER_HEIGHT = 78
+local SUB_TAB_HEADER_HEIGHT = 78
+local SUB_TAB_HEADER_GAP = 6
+local SCROLL_RIGHT_INSET = (Widgets.SCROLLBAR_WIDTH or 26) + 4
+
+local function ScrollContentWidth(tabFrame)
+    return tabFrame:GetWidth() - SCROLL_RIGHT_INSET
+end
+
+local function SubBarHeight(rowCount)
+    rowCount = rowCount or 2
+    if rowCount <= 1 then
+        return SUB_BAR_ROW_HEIGHT
+    end
+
+    return SUB_BAR_ROW_HEIGHT * rowCount + SUB_BAR_ROW_GAP * (rowCount - 1)
+end
+
+local function AnchorScrollFill(scroll, topFrame, topRelPoint, topX, topY, bottomFrame, bottomRelPoint, bottomX, bottomY)
+    scroll:ClearAllPoints()
+    scroll:SetPoint("TOPLEFT", topFrame, topRelPoint, topX, topY)
+    scroll:SetPoint("BOTTOMRIGHT", bottomFrame, bottomRelPoint, bottomX, bottomY)
+end
 
 local MAIN_TABS = {
     { id = "general", label = "General" },
@@ -27,13 +48,24 @@ local MAIN_TABS = {
     { id = "loadouts", label = "Loadouts" },
     { id = "dungeons", label = "Dungeons" },
     { id = "raids", label = "Raids" },
+    { id = "delves", label = "Delves" },
+    { id = "pvp", label = "PvP" },
 }
 
 local function ClearChildren(frame)
+    Widgets.CloseAllDropdowns()
+
     local children = { frame:GetChildren() }
     for i = #children, 1, -1 do
         children[i]:Hide()
         children[i]:SetParent(nil)
+    end
+
+    -- FontStrings and textures on the host are cleared when its content frame is destroyed.
+    local regions = { frame:GetRegions() }
+    for i = #regions, 1, -1 do
+        regions[i]:Hide()
+        regions[i]:SetParent(nil)
     end
 end
 
@@ -47,7 +79,11 @@ function Shell:ClearScroll(scrollChild)
     if scrollChild then
         ClearChildren(scrollChild)
         scrollChild:SetHeight(1)
-        Widgets.UpdateScrollRange(scrollChild:GetParent())
+        local scroll = scrollChild:GetParent()
+        if scroll and scroll.SetVerticalScroll then
+            scroll:SetVerticalScroll(0)
+            Widgets.UpdateScrollRange(scroll)
+        end
     end
 end
 
@@ -56,33 +92,54 @@ function Shell:EnsurePlainContent(tabFrame)
         return tabFrame
     end
 
-    local width = tabFrame:GetWidth()
     local height = tabFrame:GetHeight()
-    local scroll, scrollChild = Widgets.CreateScroll(tabFrame, width, height)
+    local scrollWidth = ScrollContentWidth(tabFrame)
+    local scroll, scrollChild = Widgets.CreateScroll(tabFrame, scrollWidth, height)
+    Widgets.ConfigureMenuScroll(scroll, scrollWidth)
+    AnchorScrollFill(scroll, tabFrame, "TOPLEFT", 0, 0, tabFrame, "BOTTOMRIGHT", -SCROLL_RIGHT_INSET, 0)
     tabFrame.scroll = scroll
     tabFrame.scrollChild = scrollChild
     return tabFrame
 end
 
-function Shell:EnsureDungeonContent(tabFrame)
+function Shell:LayoutSubTabContent(tabFrame, subBarRows)
+    if not tabFrame or not tabFrame.scroll or not tabFrame.header or not tabFrame.subBar then
+        return
+    end
+
+    local scrollWidth = ScrollContentWidth(tabFrame)
+    local subBarHeight = SubBarHeight(subBarRows or 2)
+
+    tabFrame.subBar:SetHeight(subBarHeight)
+
+    local scroll = tabFrame.scroll
+    Widgets.ConfigureMenuScroll(scroll, scrollWidth)
+    AnchorScrollFill(scroll, tabFrame.header, "BOTTOMLEFT", 0, -SUB_TAB_HEADER_GAP, tabFrame, "BOTTOMRIGHT", -SCROLL_RIGHT_INSET, 0)
+
+    tabFrame.scrollChild:SetWidth(scrollWidth)
+    Widgets.UpdateScrollRange(scroll)
+end
+
+function Shell:EnsureSubTabContent(tabFrame)
     if tabFrame.header then
         return tabFrame
     end
 
     local width = tabFrame:GetWidth()
+    local scrollWidth = ScrollContentWidth(tabFrame)
     local height = tabFrame:GetHeight()
-    local listHeight = height - SUB_BAR_HEIGHT - DUNGEON_HEADER_HEIGHT - 12
 
     local subBar = CreateFrame("Frame", nil, tabFrame)
     subBar:SetPoint("TOPLEFT", tabFrame, "TOPLEFT", 0, 0)
     subBar:SetSize(width, SUB_BAR_HEIGHT)
 
     local header = CreateFrame("Frame", nil, tabFrame)
-    header:SetPoint("TOPLEFT", subBar, "BOTTOMLEFT", 0, -6)
-    header:SetSize(width, DUNGEON_HEADER_HEIGHT)
+    header:SetPoint("TOPLEFT", subBar, "BOTTOMLEFT", 0, -SUB_TAB_HEADER_GAP)
+    header:SetSize(width, SUB_TAB_HEADER_HEIGHT)
 
-    local scroll, scrollChild = Widgets.CreateScroll(tabFrame, width, listHeight)
-    scroll:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -6)
+    local scroll, scrollChild = Widgets.CreateScroll(tabFrame, scrollWidth, height)
+    Widgets.ConfigureMenuScroll(scroll, scrollWidth)
+    AnchorScrollFill(scroll, header, "BOTTOMLEFT", 0, -SUB_TAB_HEADER_GAP, tabFrame, "BOTTOMRIGHT", -SCROLL_RIGHT_INSET, 0)
 
     tabFrame.subBar = subBar
     tabFrame.header = header

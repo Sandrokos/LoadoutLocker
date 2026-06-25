@@ -6,6 +6,8 @@ local Gear = LoadoutLocker.Gear
 local Menu = LoadoutLocker.Menu
 local DungeonUI = LoadoutLocker.DungeonUI
 local RaidUI = LoadoutLocker.RaidUI
+local DelveUI = LoadoutLocker.DelveUI
+local PvPUI = LoadoutLocker.PvPUI
 
 local loginSynced
 
@@ -17,11 +19,13 @@ local function ShowHelp()
     Print("/locker delete - Remove the saved gear set for the active talent loadout")
     Print("/locker scan - Check bags for better versions of current loadout items")
     Print("/locker sim dungeon - Preview the dungeon loadout prompt")
+    Print("/locker sim delve - Preview the delve loadout prompt")
+    Print("/locker sim pvp [arena|battleground] - Preview the PvP loadout prompt")
     Print("/locker sim raid [march] - Simulate being inside a raid")
     Print("/locker sim raid stop - End raid simulation")
     Print("/locker debug raid - Print raid prompt diagnostics")
     Print("/locker help - Show this help")
-    Print("Use /locker and open the Dungeons or Raids tab to assign loadouts.")
+    Print("Use /locker and open the Dungeons, Raids, Delves, or PvP tab to assign loadouts.")
 end
 
 local function HandleSlashCommand(msg)
@@ -39,6 +43,15 @@ local function HandleSlashCommand(msg)
         Gear.ScanForUpgrades()
     elseif msg == "sim dungeon" or msg == "simdungeon" then
         DungeonUI.Simulate()
+    elseif msg == "sim delve" or msg == "simdelve" then
+        DelveUI.Simulate()
+    elseif msg:match("^sim pvp") then
+        local mode = strtrim(msg:sub(8))
+        if mode == "" then
+            PvPUI.Simulate()
+        else
+            PvPUI.Simulate(mode)
+        end
     elseif msg == "sim raid stop" or msg == "sim raid off" then
         RaidUI.Simulate("stop")
     elseif msg == "sim raid" or msg == "simraid" then

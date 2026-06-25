@@ -20,11 +20,14 @@ local DF = _G.DetailsFramework
 local OPTIONS_DROPDOWN_TEMPLATE = DF and DF:GetTemplate("dropdown", "OPTIONS_DROPDOWN_TEMPLATE")
 
 local dropdownSerial = 0
+local activeDropdowns = {}
 
 local ROW_HEIGHT = 28
 local DROPDOWN_WIDTH = 220
 local LABEL_WIDTH = 300
 local SCROLLBAR_WIDTH = 26
+Widgets.SCROLLBAR_WIDTH = SCROLLBAR_WIDTH
+local SCROLL_RIGHT_INSET = SCROLLBAR_WIDTH + 4
 local PANEL_INSET_X = 4
 local PANEL_PAD_TOP = 6
 local PANEL_PAD_BOTTOM = 6
@@ -143,17 +146,26 @@ function Widgets.UpdateScrollRange(scroll)
 
     local needsScroll = (scrollChild:GetHeight() or 0) > (scroll:GetHeight() or 0) + 2
     local scrollBar = GetScrollBar(scroll)
+    local frameWidth = scroll.keepFrameWidth and (scroll:GetWidth() or scroll.fullWidth) or nil
 
     if needsScroll then
-        local narrowWidth = scroll.fullWidth - scroll.scrollbarWidth
-        scroll:SetWidth(narrowWidth)
-        scrollChild:SetWidth(narrowWidth)
+        local narrowWidth = (frameWidth or scroll.fullWidth) - scroll.scrollbarWidth
+        if scroll.keepFrameWidth then
+            scrollChild:SetWidth(narrowWidth)
+        else
+            scroll:SetWidth(narrowWidth)
+            scrollChild:SetWidth(narrowWidth)
+        end
         if scrollBar then
             scrollBar:Show()
         end
     else
-        scroll:SetWidth(scroll.fullWidth)
-        scrollChild:SetWidth(scroll.fullWidth)
+        if scroll.keepFrameWidth then
+            scrollChild:SetWidth(frameWidth or scroll.fullWidth)
+        else
+            scroll:SetWidth(scroll.fullWidth)
+            scrollChild:SetWidth(scroll.fullWidth)
+        end
         scroll:SetVerticalScroll(0)
         if scrollBar then
             scrollBar:Hide()
@@ -183,6 +195,11 @@ function Widgets.CreateScroll(parent, width, height)
     end
 
     return scroll, child
+end
+
+function Widgets.ConfigureMenuScroll(scroll, fullWidth)
+    scroll.fullWidth = fullWidth
+    scroll.keepFrameWidth = true
 end
 
 function Widgets.CreateSidebarButton(parent, text, width, height)
@@ -260,9 +277,18 @@ function Widgets.CreateHeaderButton(parent, text, width, height)
     return btn
 end
 
-function Widgets.NewBuilder(scrollChild)
+function Widgets.NewBuilder(host)
+    local parent = CreateFrame("Frame", nil, host)
+    parent:SetPoint("TOPLEFT", host, "TOPLEFT", 0, 0)
+    local width = host:GetWidth()
+    if not width or width <= 1 then
+        local scroll = host:GetParent()
+        width = (scroll and scroll.fullWidth) or 400
+    end
+    parent:SetWidth(width)
+    parent:SetHeight(1)
     return {
-        parent = scrollChild,
+        parent = parent,
         y = 0,
         dropdowns = {},
     }
@@ -316,7 +342,7 @@ end
 
 function Widgets.AddSeparator(builder)
     local line = builder.parent:CreateTexture(nil, "ARTWORK")
-    line:SetColorTexture(0.45, 0.38, 0.22, 0.45)
+    line:SetColorTexture(unpack(Style.separator))
     line:SetHeight(1)
     line:SetPoint("TOPLEFT", builder.parent, "TOPLEFT", 4, -builder.y)
     line:SetPoint("TOPRIGHT", builder.parent, "TOPRIGHT", -4, -builder.y)
@@ -417,7 +443,18 @@ function Widgets.CreateDropdown(parent, width)
         CloseDropdownMenu(self, originalClose)
     end
 
+    activeDropdowns[#activeDropdowns + 1] = dropdown
     return dropdown
+end
+
+function Widgets.CloseAllDropdowns()
+    for i = #activeDropdowns, 1, -1 do
+        local dropdown = activeDropdowns[i]
+        if dropdown and dropdown.Close then
+            dropdown:Close()
+        end
+    end
+    wipe(activeDropdowns)
 end
 
 function Widgets.AddDropdown(builder, width, list, value, onSelect)
@@ -498,6 +535,121 @@ function Widgets.AddAssignmentRow(builder, labelText, getState, onSelect)
     return dropdown
 end
 
+local OVERVIEW_NAME_WIDTH = 0.46
+local OVERVIEW_EM_WIDTH = 0.38
+local OVERVIEW_MAX_LIST_HEIGHT = ROW_HEIGHT * 6 + 10
+
+local function AddOverviewColumnText(row, text, x, width, fontObject, color)
+    local label = row:CreateFontString(nil, "OVERLAY", fontObject or "GameFontHighlight")
+    label:SetPoint("LEFT", row, "LEFT", x, 0)
+    label:SetWidth(math.max(40, width - 4))
+    label:SetJustifyH("LEFT")
+    label:SetWordWrap(false)
+    if color then
+        label:SetTextColor(unpack(color))
+    end
+    label:SetText(TruncateText(text, 42) or text)
+    return label
+end
+
+local function AddOverviewGearCheck(row, x, width, saved)
+    local icon = row:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(16, 16)
+    icon:SetPoint("LEFT", row, "LEFT", x + math.max(0, math.floor((width - 16) / 2)), 0)
+    if saved then
+        icon:SetTexture("Interface\\RaidFrame\\ReadyCheck-Ready")
+    else
+        icon:SetTexture("Interface\\RaidFrame\\ReadyCheck-NotReady")
+        icon:SetAlpha(0.35)
+    end
+end
+
+function Widgets.AddLoadoutOverviewTable(builder, rows)
+    local parent = builder.parent
+    local listWidth = parent:GetWidth() - SCROLL_RIGHT_INSET - 4
+    local nameWidth = math.floor(listWidth * OVERVIEW_NAME_WIDTH)
+    local emWidth = math.floor(listWidth * OVERVIEW_EM_WIDTH)
+    local gearWidth = listWidth - nameWidth - emWidth
+    local nameX = 4
+    local emX = nameX + nameWidth
+    local gearX = emX + emWidth
+    local headerColor = Style.title
+    local separatorGap = 12
+    local bottomGap = 8
+
+    local innerY = 0
+    if not rows or #rows == 0 then
+        innerY = ROW_HEIGHT
+    else
+        innerY = #rows * (ROW_HEIGHT + 2)
+    end
+
+    local listHeight = math.min(math.max(innerY, 1), OVERVIEW_MAX_LIST_HEIGHT)
+    local blockHeight = ROW_HEIGHT + separatorGap + listHeight + bottomGap
+
+    local block = CreateFrame("Frame", nil, parent)
+    block:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -builder.y)
+    block:SetSize(listWidth, blockHeight)
+
+    local header = CreateFrame("Frame", nil, block)
+    header:SetPoint("TOPLEFT", block, "TOPLEFT", 0, 0)
+    header:SetSize(listWidth, ROW_HEIGHT)
+    AddOverviewColumnText(header, "Talent name", nameX, nameWidth, "GameFontNormalSmall", headerColor)
+    AddOverviewColumnText(header, "Equipment set", emX, emWidth, "GameFontNormalSmall", headerColor)
+    AddOverviewColumnText(header, "Gear saved", gearX, gearWidth, "GameFontNormalSmall", headerColor)
+
+    local line = block:CreateTexture(nil, "ARTWORK")
+    line:SetColorTexture(unpack(Style.separator))
+    line:SetHeight(1)
+    line:SetPoint("TOPLEFT", block, "TOPLEFT", 4, -ROW_HEIGHT)
+    line:SetPoint("TOPRIGHT", block, "TOPRIGHT", -4, -ROW_HEIGHT)
+
+    local scroll, scrollChild = Widgets.CreateScroll(block, listWidth, listHeight)
+    scroll:ClearAllPoints()
+    scroll:SetPoint("TOPLEFT", block, "TOPLEFT", 0, -(ROW_HEIGHT + separatorGap))
+    Widgets.ConfigureMenuScroll(scroll, listWidth)
+
+    innerY = 0
+    if not rows or #rows == 0 then
+        local emptyLabel = scrollChild:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        emptyLabel:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 4, -innerY)
+        emptyLabel:SetWidth(listWidth - 8)
+        emptyLabel:SetJustifyH("LEFT")
+        emptyLabel:SetText("No loadouts found.")
+        innerY = innerY + ROW_HEIGHT
+    else
+        for _, rowData in ipairs(rows) do
+            local row = CreateFrame("Frame", nil, scrollChild)
+            row:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 0, -innerY)
+            row:SetSize(listWidth, ROW_HEIGHT)
+
+            local nameText = rowData.name
+            if rowData.isActive then
+                nameText = nameText .. " (active)"
+            end
+            local nameColor = rowData.isActive and { 1, 0.82, 0.35 } or nil
+            AddOverviewColumnText(row, nameText, nameX, nameWidth, "GameFontHighlight", nameColor)
+
+            local emName = rowData.equipmentSetName
+            if not emName or emName == "" then
+                emName = "—"
+            end
+            AddOverviewColumnText(row, emName, emX, emWidth, "GameFontHighlightSmall")
+
+            AddOverviewGearCheck(row, gearX, gearWidth, rowData.hasSavedGear)
+
+            innerY = innerY + ROW_HEIGHT + 2
+        end
+    end
+
+    scrollChild:SetHeight(math.max(innerY, 1))
+    scroll:SetHeight(listHeight)
+    Widgets.UpdateScrollRange(scroll)
+
+    builder.y = builder.y + blockHeight
+    return builder
+end
+
 function Widgets.AddPriorityRow(builder, rank, labelText, onUp, onDown, upDisabled, downDisabled)
     local row = CreateFrame("Frame", nil, builder.parent)
     row:SetPoint("TOPLEFT", builder.parent, "TOPLEFT", 0, -builder.y)
@@ -550,7 +702,17 @@ end
 
 function Widgets.FinishBuilder(builder)
     local height = math.max(builder.y + 16, 1)
+    local host = builder.parent:GetParent()
     builder.parent:SetHeight(height)
-    Widgets.UpdateScrollRange(builder.parent:GetParent())
+    if not host then
+        return builder
+    end
+
+    host:SetHeight(height)
+    local scroll = host:GetParent()
+    if scroll and scroll.GetScrollChild and scroll:GetScrollChild() == host then
+        Widgets.UpdateScrollRange(scroll)
+        builder.parent:SetWidth(host:GetWidth())
+    end
     return builder
 end

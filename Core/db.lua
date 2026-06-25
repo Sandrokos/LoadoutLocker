@@ -86,6 +86,8 @@ function DB:Initialize()
     LoadoutLockerDB = LoadoutLockerDB or {}
     LoadoutLockerDB.dungeonAssignments = LoadoutLockerDB.dungeonAssignments or {}
     LoadoutLockerDB.raidAssignments = LoadoutLockerDB.raidAssignments or {}
+    LoadoutLockerDB.delveAssignments = LoadoutLockerDB.delveAssignments or {}
+    LoadoutLockerDB.pvpAssignments = LoadoutLockerDB.pvpAssignments or {}
     self:GetTertiaryPriority()
 end
 
@@ -99,6 +101,10 @@ end
 
 function DB:GetDungeonAssignments(specID)
     return EnsureAssignmentStore("dungeonAssignments", "dungeons", specID)
+end
+
+function DB:GetDungeonAssignmentsIfExists(specID)
+    return GetAssignmentStoreIfExists("dungeonAssignments", specID)
 end
 
 function DB:GetDungeonDefaultConfigID(specID)
@@ -117,12 +123,12 @@ function DB:SetDungeonDefaultConfigID(specID, configID)
 end
 
 function DB:GetDungeonConfigID(specID, dungeonKey)
-    local assignments = self:GetDungeonAssignments(specID)
+    local assignments = GetAssignmentStoreIfExists("dungeonAssignments", specID)
     if not assignments then
         return nil
     end
 
-    local override = assignments.dungeons[dungeonKey]
+    local override = assignments.dungeons and assignments.dungeons[dungeonKey]
     if override then
         return override
     end
@@ -136,10 +142,13 @@ function DB:SetDungeonConfigID(specID, dungeonKey, configID)
         return false
     end
 
-    if configID then
-        assignments.dungeons[dungeonKey] = configID
-    else
-        assignments.dungeons[dungeonKey] = nil
+    local Dungeons = LoadoutLocker.Dungeons
+    for _, key in ipairs(Dungeons.GetLinkedAssignmentKeys(dungeonKey)) do
+        if configID then
+            assignments.dungeons[key] = configID
+        else
+            assignments.dungeons[key] = nil
+        end
     end
 
     return true
@@ -228,6 +237,120 @@ end
 
 function DB:ClearRaidBossConfigID(specID, raidKey, bossKey)
     return self:SetRaidBossConfigID(specID, raidKey, bossKey, nil)
+end
+
+function DB:AreDelvePromptsEnabled()
+    return GetPromptFlag("delvePromptsEnabled")
+end
+
+function DB:SetDelvePromptsEnabled(enabled)
+    SetPromptFlag("delvePromptsEnabled", enabled)
+end
+
+function DB:GetDelveAssignments(specID)
+    return EnsureAssignmentStore("delveAssignments", "delves", specID)
+end
+
+function DB:GetDelveAssignmentsIfExists(specID)
+    return GetAssignmentStoreIfExists("delveAssignments", specID)
+end
+
+function DB:GetDelveDefaultConfigID(specID)
+    local assignments = GetAssignmentStoreIfExists("delveAssignments", specID)
+    return assignments and assignments.defaultConfigID
+end
+
+function DB:SetDelveDefaultConfigID(specID, configID)
+    local assignments = self:GetDelveAssignments(specID)
+    if not assignments then
+        return false
+    end
+
+    assignments.defaultConfigID = configID
+    return true
+end
+
+function DB:GetDelveConfigID(specID, delveKey)
+    local assignments = GetAssignmentStoreIfExists("delveAssignments", specID)
+    if not assignments then
+        return nil
+    end
+
+    local override = assignments.delves and assignments.delves[delveKey]
+    if override then
+        return override
+    end
+
+    return assignments.defaultConfigID
+end
+
+function DB:SetDelveConfigID(specID, delveKey, configID)
+    local assignments = self:GetDelveAssignments(specID)
+    if not assignments or not delveKey then
+        return false
+    end
+
+    assignments.delves[delveKey] = configID
+    return true
+end
+
+function DB:ClearDelveConfigID(specID, delveKey)
+    return self:SetDelveConfigID(specID, delveKey, nil)
+end
+
+function DB:ArePvPPromptsEnabled()
+    return GetPromptFlag("pvpPromptsEnabled")
+end
+
+function DB:SetPvPPromptsEnabled(enabled)
+    SetPromptFlag("pvpPromptsEnabled", enabled)
+end
+
+function DB:GetPvPAssignments(specID)
+    return EnsureAssignmentStore("pvpAssignments", "modes", specID)
+end
+
+function DB:GetPvPDefaultConfigID(specID)
+    local assignments = GetAssignmentStoreIfExists("pvpAssignments", specID)
+    return assignments and assignments.defaultConfigID
+end
+
+function DB:SetPvPDefaultConfigID(specID, configID)
+    local assignments = self:GetPvPAssignments(specID)
+    if not assignments then
+        return false
+    end
+
+    assignments.defaultConfigID = configID
+    return true
+end
+
+function DB:GetPvPConfigID(specID, modeKey)
+    local assignments = GetAssignmentStoreIfExists("pvpAssignments", specID)
+    if not assignments then
+        return nil
+    end
+
+    local override = assignments.modes and assignments.modes[modeKey]
+    if override then
+        return override
+    end
+
+    return assignments.defaultConfigID
+end
+
+function DB:SetPvPConfigID(specID, modeKey, configID)
+    local assignments = self:GetPvPAssignments(specID)
+    if not assignments or not modeKey then
+        return false
+    end
+
+    assignments.modes[modeKey] = configID
+    return true
+end
+
+function DB:ClearPvPConfigID(specID, modeKey)
+    return self:SetPvPConfigID(specID, modeKey, nil)
 end
 
 function DB:AreUpgradeChecksEnabled()

@@ -48,6 +48,32 @@ function Dungeons.GetByKey(key)
     return byKey[key]
 end
 
+local function AddLinkedKey(keys, seen, key)
+    if key and not seen[key] then
+        seen[key] = true
+        keys[#keys + 1] = key
+    end
+end
+
+function Dungeons.GetLinkedAssignmentKeys(dungeonKey)
+    local keys = {}
+    local seen = {}
+    AddLinkedKey(keys, seen, dungeonKey)
+
+    local dungeon = byKey[dungeonKey]
+    if not dungeon then
+        return keys
+    end
+
+    for _, instanceID in ipairs(dungeon.instanceIDs) do
+        for _, linkedKey in ipairs(byInstanceID[instanceID] or {}) do
+            AddLinkedKey(keys, seen, linkedKey)
+        end
+    end
+
+    return keys
+end
+
 local function ExpansionSectionKey(name)
     return "exp_" .. name:lower():gsub("'", ""):gsub("[^%w]+", "_"):gsub("^_", ""):gsub("_$", "")
 end
