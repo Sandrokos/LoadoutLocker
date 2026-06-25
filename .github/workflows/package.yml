@@ -2,12 +2,13 @@ name: Package Addon
 
 on:
   push:
+    branches:
+      - master
     tags:
-      - "v*"
-  workflow_dispatch:
-
-permissions:
-  contents: write
+      - '*'
+    paths-ignore:
+      - '.github/**'
+      - '.vscode/**'
 
 jobs:
   release:
@@ -23,38 +24,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Run luacheck
+        uses: BigWigsMods/luacheck@main
+        with:
+          args: -q
+
       - name: Package and release
         if: startsWith(github.ref, 'refs/tags/')
         uses: BigWigsMods/packager@v2
-
-      - name: Package only
-        if: github.event_name == 'workflow_dispatch'
-        uses: BigWigsMods/packager@v2
-        with:
-          args: -d
-
-      - name: Remove changelog from package archives
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
-        run: |
-          for zip in .release/*.zip; do
-            [ -f "$zip" ] || continue
-            zip -d "$zip" "LoadoutLocker/CHANGELOG.md" 2>/dev/null || true
-          done
-
-      - name: Update GitHub release assets
-        if: startsWith(github.ref, 'refs/tags/')
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          tag="${GITHUB_REF#refs/tags/}"
-          for zip in .release/*.zip; do
-            [ -f "$zip" ] || continue
-            gh release upload "$tag" "$zip" --clobber
-          done
-
-      - name: Upload artifact
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
-        with:
-          name: LoadoutLocker
-          path: .release/*.zip
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
+          WOWI_API_TOKEN: ${{ secrets.WOWI_API_TOKEN }}
+          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
