@@ -1,0 +1,84 @@
+name: Bug Report
+description: Report something that is not working correctly
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug.
+
+        Before submitting, run **`/locker debug`** in WoW, copy the debug text (Ctrl+A, Ctrl+C), and paste it into the **Debug info** field below.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the bug clearly. Include what you were trying to do.
+      placeholder: When I switch loadouts in a delve, gear does not equip...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the steps needed to reproduce the issue.
+      placeholder: |
+        1. Assign a delve loadout in /locker
+        2. Enter a delve
+        3. Click Switch Loadout on the prompt
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: LoadoutLocker should equip the saved gear set after talents apply.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      placeholder: Only talents changed; gear stayed the same.
+    validations:
+      required: true
+
+  - type: input
+    id: addon-version
+    attributes:
+      label: LoadoutLocker version
+      description: Shown in the debug output from /locker debug, or in the AddOns list.
+      placeholder: "1.11.0"
+    validations:
+      required: true
+
+  - type: input
+    id: wow-version
+    attributes:
+      label: WoW version
+      description: Retail Midnight build if known (e.g. 12.0.0).
+      placeholder: Retail 12.x
+    validations:
+      required: false
+
+  - type: textarea
+    id: debug-info
+    attributes:
+      label: Debug info
+      description: Paste the full output from /locker debug.
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or errors
+      description: Paste any Lua error text or describe screenshots you can attach.
+    validations:
+      required: false

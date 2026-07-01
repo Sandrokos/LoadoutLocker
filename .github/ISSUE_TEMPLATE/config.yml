@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: In-game debug output
+    url: https://github.com/Sandrokos/LoadoutLocker/issues/new?template=bug_report.yml
+    about: Run /locker debug in WoW and paste the output into a bug report.

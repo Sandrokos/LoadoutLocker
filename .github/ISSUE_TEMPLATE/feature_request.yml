@@ -1,0 +1,58 @@
+name: Feature Request
+description: Suggest an idea for LoadoutLocker
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a feature. The more context you provide, the easier it is to evaluate.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What problem does this solve, or what workflow are you trying to improve?
+      placeholder: I often swap between raid and M+ builds and want...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe the feature you would like to see.
+      placeholder: Add an option to...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any workarounds you use today, or other approaches you considered.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: areas
+    attributes:
+      label: Related areas
+      description: Which parts of LoadoutLocker does this relate to?
+      options:
+        - label: Gear save / auto-equip
+        - label: Upgrade scan
+        - label: Content prompts (dungeons, raids, delves, PvP)
+        - label: Cross-spec loadout switching
+        - label: Menu / settings
+        - label: Slash commands
+        - label: Other
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Screenshots, examples, or links.
+    validations:
+      required: false
