@@ -52,6 +52,49 @@ function Widgets.CreateCloseButton(parent, onClick)
     return close
 end
 
+function Widgets.CreateDialogFrame(options)
+    options = options or {}
+
+    local frame = CreateFrame("Frame", options.name, UIParent, "BackdropTemplate")
+    frame:SetSize(options.width or 420, options.height or 330)
+    frame:SetPoint("CENTER")
+    frame:SetFrameStrata("FULLSCREEN_DIALOG")
+    frame:SetFrameLevel(options.frameLevel or 350)
+    frame:SetMovable(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", frame.StartMoving)
+    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+    frame:SetBackdrop(C.DIALOG_BACKDROP)
+    frame:Hide()
+
+    if options.name then
+        tinsert(UISpecialFrames, options.name)
+    end
+
+    if options.title or options.titleWidth then
+        frame.title = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+        frame.title:SetPoint("TOP", frame, "TOP", 0, options.titleOffsetY or -16)
+        frame.title:SetTextColor(Style.title[1], Style.title[2], Style.title[3])
+        if options.titleWidth then
+            frame.title:SetWidth(options.titleWidth)
+            frame.title:SetWordWrap(true)
+            frame.title:SetJustifyH("CENTER")
+        end
+        if options.title then
+            frame.title:SetText(options.title)
+        end
+    end
+
+    if options.onClose then
+        Widgets.CreateCloseButton(frame, function()
+            options.onClose(frame)
+        end)
+    end
+
+    return frame
+end
+
 function Widgets.ConfigureReadOnlyEditBox(editBox, transparentBackground)
     editBox:SetScript("OnChar", function()
     end)

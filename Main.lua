@@ -1,6 +1,7 @@
 local ADDON_NAME = ...
 
 local Print = LoadoutLocker.Print
+local Text = LoadoutLocker.Text
 local C = LoadoutLocker.Constants
 local DB = LoadoutLocker.DB
 local Gear = LoadoutLocker.Gear
@@ -11,9 +12,14 @@ local DungeonUI = LoadoutLocker.DungeonUI
 local RaidUI = LoadoutLocker.RaidUI
 local DelveUI = LoadoutLocker.DelveUI
 local PvPUI = LoadoutLocker.PvPUI
+local OnboardingUI = LoadoutLocker.OnboardingUI
 
 local loginSynced
 local traitConfigUpdateTimer
+
+local function PrintMenuReminder()
+    Print("Type " .. Text.FormatCommand() .. " to open the menu.")
+end
 
 local function HandleTraitConfigUpdated()
     Loadout.InvalidateListCache()
@@ -56,6 +62,7 @@ local function ShowHelp()
     Print("/locker sim raid [march] - Simulate being inside a raid")
     Print("/locker sim raid stop - End raid simulation")
     Print("/locker debug - Open bug report with debug info")
+    Print("/locker tutorial - Show the getting started guide")
     Print("/locker help - Show this help")
     Print("Use /locker and open the Dungeons, Raids, Delves, or PvP tab to assign loadouts.")
 end
@@ -92,6 +99,8 @@ local function HandleSlashCommand(msg)
         RaidUI.Simulate(strtrim(msg:sub(10)))
     elseif msg == "debug" or msg == "debug raid" then
         LoadoutLocker.BugReportUI.ShowDebugOutput()
+    elseif msg == "tutorial" or msg == "onboarding" or msg == "guide" then
+        OnboardingUI.Show({ force = true })
     elseif msg == "delete" or msg == "clear" then
         Gear.Delete()
     else
@@ -116,8 +125,12 @@ frame:SetScript("OnEvent", function(_, event, arg1)
         Menu.RegisterWithSettings()
         LoadoutLocker.BugReportUI.InstallErrorCapture()
     elseif event == "PLAYER_LOGIN" then
+        PrintMenuReminder()
         if not loginSynced and Loadout.RecordCurrent() then
             loginSynced = true
+        end
+        if not DB:IsOnboardingComplete() then
+            OnboardingUI.TryShowOnLogin()
         end
     elseif event == "TRAIT_CONFIG_LIST_UPDATED" then
         Loadout.InvalidateListCache()

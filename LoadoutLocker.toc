@@ -3,6 +3,7 @@
 ## Notes: Saves and restores gear sets per talent loadout.
 ## Author: Sandrokos
 ## Version: 1.10.0
+## SavedVariables: LoadoutLockerAccountDB
 ## SavedVariablesPerCharacter: LoadoutLockerDB
 
 Libs\libs.xml
@@ -38,5 +39,6 @@ UI\RaidUI.lua
 UI\BugReportUI.lua
 UI\DelveUI.lua
 UI\PvPUI.lua
+UI\OnboardingUI.lua
 Main.lua
 UI\UI.lua

@@ -24,6 +24,8 @@ Built for **World of Warcraft: Midnight** (Interface `120007`). Current version:
 2. Enable **LoadoutLocker** on the character select screen
 3. `/reload` if you add or update the addon while logged in
 
+On first login per account, LoadoutLocker shows a short getting-started guide. Skip it anytime, or reopen with `/locker tutorial`.
+
 ## Usage
 
 ### Save gear
@@ -44,7 +46,7 @@ Select a different talent loadout as usual. If a saved gear set exists for that 
 
 Loadouts with no saved gear are left unchanged.
 
-When you accept a **Switch Loadout** prompt for another specialization, LoadoutLocker changes spec first, then talents, then gear. The prompt shows progress while the swap runs and closes when finished. Moving during a spec cast cancels the swap.
+When you accept a **Switch Loadout** prompt for another specialization, LoadoutLocker changes spec first, then talents, then gear. The prompt shows progress while the swap runs and closes when finished.
 
 ### Upgrade scan
 
@@ -82,11 +84,7 @@ Toggle each prompt type on the **General** tab:
 | `/locker list` | List saved gear sets for your current specialization |
 | `/locker delete` | Remove the saved gear set for the active talent loadout |
 | `/locker scan` | Check bags for better versions of saved loadout items |
-| `/locker sim dungeon` | Preview the dungeon loadout prompt |
-| `/locker sim delve` | Preview the delve loadout prompt |
-| `/locker sim pvp [arena\|battleground]` | Preview the PvP loadout prompt |
-| `/locker sim raid [raid]` | Simulate being inside a raid |
-| `/locker sim raid stop` | End raid simulation |
+| `/locker tutorial` | Show the getting started guide |
 | `/locker debug` | Open bug report with debug info |
 | `/locker help` | Show command help |
 

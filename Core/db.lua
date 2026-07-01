@@ -4,6 +4,7 @@ local DB = {}
 LoadoutLocker.DB = DB
 
 LoadoutLockerDB = LoadoutLockerDB or {}
+LoadoutLockerAccountDB = LoadoutLockerAccountDB or {}
 
 local C = LoadoutLocker.Constants
 local cachedTertiaryPriority
@@ -14,6 +15,14 @@ end
 
 local function SetPromptFlag(key, enabled)
     LoadoutLockerDB[key] = enabled and true or false
+end
+
+local function GetAccountFlag(key)
+    return LoadoutLockerAccountDB[key] == true
+end
+
+local function SetAccountFlag(key, enabled)
+    LoadoutLockerAccountDB[key] = enabled and true or false
 end
 
 local function NormalizeInvSlot(invSlot)
@@ -283,6 +292,7 @@ end
 
 function DB:Initialize()
     LoadoutLockerDB = LoadoutLockerDB or {}
+    LoadoutLockerAccountDB = LoadoutLockerAccountDB or {}
     LoadoutLockerDB.dungeonAssignments = LoadoutLockerDB.dungeonAssignments or {}
     LoadoutLockerDB.raidAssignments = LoadoutLockerDB.raidAssignments or {}
     LoadoutLockerDB.delveAssignments = LoadoutLockerDB.delveAssignments or {}
@@ -291,6 +301,9 @@ function DB:Initialize()
     MigrateLegacyAssignmentStore("raidAssignments", "raids", true)
     MigrateLegacyAssignmentStore("delveAssignments", "delves", false)
     MigrateLegacyAssignmentStore("pvpAssignments", "modes", false)
+    if LoadoutLockerAccountDB.onboardingComplete ~= true then
+        LoadoutLockerAccountDB.onboardingComplete = nil
+    end
     self:GetTertiaryPriority()
 end
 
@@ -673,4 +686,12 @@ end
 
 function DB:GetSpecEntries(specID)
     return LoadoutLockerDB[specID]
+end
+
+function DB:IsOnboardingComplete()
+    return GetAccountFlag("onboardingComplete")
+end
+
+function DB:SetOnboardingComplete()
+    SetAccountFlag("onboardingComplete", true)
 end

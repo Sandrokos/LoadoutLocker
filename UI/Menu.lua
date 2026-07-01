@@ -4,6 +4,7 @@ LoadoutLocker.Menu = Menu
 local Shell = LoadoutLocker.MenuShell
 local Widgets = LoadoutLocker.MenuWidgets
 local C = LoadoutLocker.Constants
+local Text = LoadoutLocker.Text
 local DB = LoadoutLocker.DB
 local Loadout = LoadoutLocker.Loadout
 local Gear = LoadoutLocker.Gear
@@ -14,16 +15,18 @@ local PvP = LoadoutLocker.PvP
 local subTabBuildToken = { dungeons = 0, delves = 0 }
 local subTabButtons = { dungeons = {}, delves = {} }
 local selectedSubTabSectionKey = { dungeons = nil, delves = nil }
-local HELP_TEXT = "Equip gear, select a talent loadout, then save with the talent panel button or |cffffffff/locker save|r. Changing loadouts automatically equips the saved gear set.\n\n"
-    .. "|cffffffffCommands|r\n"
-    .. "/locker - open this menu\n"
-    .. "/locker save - save equipped gear to the active loadout\n"
-    .. "/locker list - list saved gear sets\n"
-    .. "/locker scan - check bags for upgrades\n"
-    .. "/locker delete - remove saved gear for the active loadout\n\n"
-    .. "Also available under |cffffffffEsc > Options > AddOns|r."
+local HELP_TEXT = "Equip gear, select a talent loadout, then save with the talent panel button or "
+    .. Text.FormatCommand("save") .. ". Changing loadouts automatically equips the saved gear set.\n\n"
+    .. Text.FormatHighlight("Commands") .. "\n"
+    .. Text.FormatCommand() .. " - open this menu\n"
+    .. Text.FormatCommand("save") .. " - save equipped gear to the active loadout\n"
+    .. Text.FormatCommand("list") .. " - list saved gear sets\n"
+    .. Text.FormatCommand("scan") .. " - check bags for upgrades\n"
+    .. Text.FormatCommand("delete") .. " - remove saved gear for the active loadout\n"
+    .. Text.FormatCommand("tutorial") .. " - show the getting started guide\n\n"
+    .. "Also available under " .. Text.FormatHighlight(Text.COPY.OPTIONS_PATH) .. "."
 local TAB_INTRO = {
-    general = "LoadoutLocker saves your equipped gear to each talent loadout and swaps it when you change builds.",
+    general = Text.COPY.TAGLINE,
     priority = "When upgrade prompts appear, higher stats at the top break ties between same item level and track.",
     loadouts = "Review talent loadouts across all specializations, manage saved gear sets, ignored upgrade slots, and copying between loadouts.",
     dungeons = "Set a default talent loadout and optional per-dungeon overrides from any saved loadout (Spec-Talent name). Use the category buttons above to browse season and expansion dungeons.",

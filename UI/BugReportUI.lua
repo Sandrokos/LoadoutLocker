@@ -300,28 +300,17 @@ local function EnsureReportFrame()
     end
 
     local frameWidth = 420
-    local frame = CreateFrame("Frame", "LoadoutLockerBugReportFrame", UIParent, "BackdropTemplate")
-    frame:SetSize(frameWidth, 330)
-    frame:SetPoint("CENTER")
-    frame:SetFrameStrata("FULLSCREEN_DIALOG")
-    frame:SetFrameLevel(350)
-    frame:SetMovable(true)
-    frame:EnableMouse(true)
-    frame:RegisterForDrag("LeftButton")
-    frame:SetScript("OnDragStart", frame.StartMoving)
-    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
-    frame:SetBackdrop(C.DIALOG_BACKDROP)
-    frame:Hide()
-
-    tinsert(UISpecialFrames, frame:GetName())
-
-    local title = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    title:SetPoint("TOP", frame, "TOP", 0, -14)
-    title:SetText("Bug Report & Feedback")
-
-    Widgets.CreateCloseButton(frame, function()
-        frame:Hide()
-    end)
+    local frame = Widgets.CreateDialogFrame({
+        name = "LoadoutLockerBugReportFrame",
+        width = frameWidth,
+        height = 330,
+        frameLevel = 350,
+        title = "Bug Report & Feedback",
+        titleOffsetY = -14,
+        onClose = function(dialog)
+            dialog:Hide()
+        end,
+    })
 
     local intro = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     intro:SetPoint("TOPLEFT", frame, "TOPLEFT", 18, -40)
