@@ -2,7 +2,7 @@
 
 Save your equipped gear to each talent loadout and automatically swap when you switch builds. Assign loadouts to dungeons, raids, delves, and PvP content and get prompted when it is time to switch — including loadouts from other specializations.
 
-Built for **World of Warcraft: Midnight** (Interface `120007`). Current version: **1.10.0**.
+Built for **World of Warcraft: Midnight** (Interface `120007`). Current version: **1.11.0**.
 
 ## Features
 
