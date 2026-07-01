@@ -136,6 +136,10 @@ local function CollectSpecIDsFromSavedData(seen, specIDs)
 end
 
 function Loadout.CollectKnownSpecIDs()
+    if cachedKnownSpecIDs then
+        return cachedKnownSpecIDs
+    end
+
     local seen = {}
     local specIDs = {}
 
@@ -144,6 +148,11 @@ function Loadout.CollectKnownSpecIDs()
     CollectSpecIDsFromSavedData(seen, specIDs)
 
     table.sort(specIDs)
+    cachedKnownSpecIDs = specIDs
+    cachedKnownSpecIDSet = {}
+    for _, knownSpecID in ipairs(specIDs) do
+        cachedKnownSpecIDSet[knownSpecID] = true
+    end
     return specIDs
 end
 
@@ -167,15 +176,15 @@ function Loadout.IsKnownSpecID(specID)
         return false
     end
 
-    for _, knownSpecID in ipairs(Loadout.CollectKnownSpecIDs()) do
-        if knownSpecID == specID then
-            return true
-        end
+    if not cachedKnownSpecIDSet then
+        Loadout.CollectKnownSpecIDs()
+    end
+    if cachedKnownSpecIDSet[specID] then
+        return true
     end
 
-    local api = C_SpecializationInfo.GetSpecializationInfoForSpecID or GetSpecializationInfoForSpecID
-    if api then
-        return tonumber(select(1, api(specID))) == specID
+    if GetSpecializationInfoForSpecID then
+        return tonumber(select(1, GetSpecializationInfoForSpecID(specID))) == specID
     end
 
     return false
@@ -241,11 +250,15 @@ end
 local cachedAllConfigList
 local cachedAllSavedLoadoutList
 local cachedSavedGearKeys
+local cachedKnownSpecIDs
+local cachedKnownSpecIDSet
 
 function Loadout.InvalidateListCache()
     cachedAllConfigList = nil
     cachedAllSavedLoadoutList = nil
     cachedSavedGearKeys = nil
+    cachedKnownSpecIDs = nil
+    cachedKnownSpecIDSet = nil
 end
 
 local function GetSavedGearKeys()

@@ -1,6 +1,7 @@
 local ADDON_NAME = ...
 
 local Print = LoadoutLocker.Print
+local C = LoadoutLocker.Constants
 local DB = LoadoutLocker.DB
 local Gear = LoadoutLocker.Gear
 local Loadout = LoadoutLocker.Loadout
@@ -12,6 +13,35 @@ local DelveUI = LoadoutLocker.DelveUI
 local PvPUI = LoadoutLocker.PvPUI
 
 local loginSynced
+local traitConfigUpdateTimer
+
+local function HandleTraitConfigUpdated()
+    Loadout.InvalidateListCache()
+    local specID = Loadout.GetSpecID()
+    local configID = specID and Loadout.GetLoadoutConfigID(specID)
+    local awaiting = Loadout.GetAwaitingTalentSwitchAfterSpec()
+    if awaiting then
+        if specID == awaiting.specID and configID == awaiting.configID then
+            Loadout.ClearAwaitingTalentSwitchAfterSpec()
+            Gear.OnTalentSwitchAfterSpecComplete()
+        end
+    else
+        Gear.ScheduleLoadoutGearApply()
+    end
+    if specID and configID then
+        PromptUtils.OnPromptLoadoutTalentsApplied(specID, configID)
+    end
+end
+
+local function ScheduleTraitConfigUpdated()
+    if traitConfigUpdateTimer then
+        traitConfigUpdateTimer:Cancel()
+    end
+    traitConfigUpdateTimer = C_Timer.NewTimer(C.LOADOUT_APPLY_DELAY, function()
+        traitConfigUpdateTimer = nil
+        HandleTraitConfigUpdated()
+    end)
+end
 
 local function ShowHelp()
     Print("Commands:")
@@ -95,22 +125,9 @@ frame:SetScript("OnEvent", function(_, event, arg1)
             loginSynced = true
         end
     elseif event == "TRAIT_CONFIG_UPDATED" then
-        Loadout.InvalidateListCache()
-        local specID = Loadout.GetSpecID()
-        local configID = specID and Loadout.GetLoadoutConfigID(specID)
-        local awaiting = Loadout.GetAwaitingTalentSwitchAfterSpec()
-        if awaiting then
-            if specID == awaiting.specID and configID == awaiting.configID then
-                Loadout.ClearAwaitingTalentSwitchAfterSpec()
-                Gear.OnTalentSwitchAfterSpecComplete()
-            end
-        else
-            Gear.ScheduleLoadoutGearApply()
-        end
-        if specID and configID then
-            PromptUtils.OnPromptLoadoutTalentsApplied(specID, configID)
-        end
+        ScheduleTraitConfigUpdated()
     elseif event == "ACTIVE_PLAYER_SPECIALIZATION_CHANGED" then
+        Loadout.InvalidateListCache()
         Gear.OnSpecChanged()
     end
 end)

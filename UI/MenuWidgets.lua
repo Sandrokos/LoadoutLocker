@@ -3,13 +3,15 @@ LoadoutLocker = LoadoutLocker or {}
 local Widgets = {}
 LoadoutLocker.MenuWidgets = Widgets
 
+local C = LoadoutLocker.Constants
+
 Widgets.Style = {
     sidebarBg = { 0.10, 0.09, 0.08, 0.80 },
     buttonBg = { 0.14, 0.12, 0.10, 0.55 },
     buttonHover = { 0.50, 0.38, 0.14, 0.30 },
     buttonSelected = { 0.62, 0.48, 0.10, 0.45 },
     separator = { 0.48, 0.36, 0.14, 0.50 },
-    title = { 1, 0.82, 0.35 },
+    title = C.UI_TITLE_COLOR,
     panelBg = { 0.12, 0.10, 0.09, 0.75 },
     panelBorder = { 0.48, 0.36, 0.14, 0.40 },
     codeBg = { 0.08, 0.07, 0.06, 0.95 },
@@ -654,7 +656,7 @@ function Widgets.AddLoadoutOverviewTable(builder, rows)
             if rowData.isActive then
                 nameText = nameText .. " (active)"
             end
-            local nameColor = rowData.isActive and { 1, 0.82, 0.35 } or nil
+            local nameColor = rowData.isActive and Style.title or nil
             AddOverviewColumnText(row, rowData.specName or "—", specX, specWidth, "GameFontHighlightSmall", nameColor)
             AddOverviewColumnText(row, nameText, nameX, nameWidth, "GameFontHighlight", nameColor)
 

@@ -78,14 +78,9 @@ local DOT_SPINNER_COUNT = 8
 local DOT_SPINNER_SIZE = 5
 local DOT_SPINNER_RADIUS = 13
 local DOT_SPINNER_STEP_TIME = 0.07
-local DOT_SPINNER_COLOR_FALLBACK = { 1, 0.82, 0.35 }
 
 local function GetSpinnerColor()
-    local style = LoadoutLocker.MenuWidgets and LoadoutLocker.MenuWidgets.Style
-    if style and style.title then
-        return style.title
-    end
-    return DOT_SPINNER_COLOR_FALLBACK
+    return C.UI_TITLE_COLOR
 end
 
 local function CreateDotSpinner(spinner)
@@ -415,6 +410,32 @@ function PromptUtils.CreateScheduleEvaluate(evaluateFn)
         pendingEvaluate = C_Timer.NewTimer(delay or 0.5, evaluateFn)
     end
 end
+
+function PromptUtils.RegisterPromptEvents(onEvent, options)
+    options = options or {}
+    local frame = CreateFrame("Frame")
+    local events = options.events or { "PLAYER_ENTERING_WORLD", "ZONE_CHANGED_NEW_AREA" }
+    for _, event in ipairs(events) do
+        frame:RegisterEvent(event)
+    end
+    if options.extraEvents then
+        for _, event in ipairs(options.extraEvents) do
+            frame:RegisterEvent(event)
+        end
+    end
+    frame:SetScript("OnEvent", onEvent)
+    return frame
+end
+
+function PromptUtils.RegisterZoneEvaluate(onEvaluate, options)
+    options = options or {}
+    local schedule = PromptUtils.CreateScheduleEvaluate(onEvaluate)
+    local delay = options.delay or 0.5
+    return PromptUtils.RegisterPromptEvents(function()
+        schedule(delay)
+    end, options)
+end
+
 function PromptUtils.CreatePromptFrame(options)
     options = options or {}
     local frame = CreateFrame("Frame", options.globalName, UIParent, "BackdropTemplate")

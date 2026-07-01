@@ -846,6 +846,30 @@ local function IsAcceptableRemainingDiff(remaining, gearSet)
     return true
 end
 
+local MAX_GEAR_VERIFY_ATTEMPTS = 6
+
+local function RetryGearVerification(gearSet, attempt, reported, onComplete)
+    attempt = attempt or 1
+    reported = reported or {}
+    local delay = (attempt == 1) and (C.EQUIP_SLOT_DELAY * 2) or C.EQUIP_SLOT_DELAY
+
+    C_Timer.After(delay, function()
+        local remaining = Gear.BuildGearDiff(gearSet)
+        if remaining.empty or IsAcceptableRemainingDiff(remaining, gearSet) then
+            onComplete(true)
+            return
+        end
+
+        if attempt < MAX_GEAR_VERIFY_ATTEMPTS then
+            RetryGearVerification(gearSet, attempt + 1, reported, onComplete)
+            return
+        end
+
+        PrintGearDiffFailures(remaining, reported)
+        onComplete(false)
+    end)
+end
+
 local function RunGearSwap(gearSet, onComplete, gearDiff)
     if equipQueueRunning then
         return
@@ -885,29 +909,7 @@ local function RunGearSwap(gearSet, onComplete, gearDiff)
     end
 
     local function VerifyAndComplete(attempt)
-        attempt = attempt or 1
-        local delay = (attempt == 1) and (C.EQUIP_SLOT_DELAY * 2) or C.EQUIP_SLOT_DELAY
-
-        C_Timer.After(delay, function()
-            local remaining = Gear.BuildGearDiff(gearSet)
-            if remaining.empty then
-                FinishSwap(true)
-                return
-            end
-
-            if IsAcceptableRemainingDiff(remaining, gearSet) then
-                FinishSwap(true)
-                return
-            end
-
-            if attempt < 6 then
-                VerifyAndComplete(attempt + 1)
-                return
-            end
-
-            PrintGearDiffFailures(remaining, reported)
-            FinishSwap(false)
-        end)
+        RetryGearVerification(gearSet, attempt, reported, FinishSwap)
     end
 
     local function Step()
@@ -1135,28 +1137,7 @@ function Gear.ScheduleLoadoutGearApply()
 end
 
 local function ValidateEquippedGear(gearSet, onComplete)
-    local function check(attempt)
-        attempt = attempt or 1
-        local delay = (attempt == 1) and (C.EQUIP_SLOT_DELAY * 2) or C.EQUIP_SLOT_DELAY
-
-        C_Timer.After(delay, function()
-            local remaining = Gear.BuildGearDiff(gearSet)
-            if remaining.empty or IsAcceptableRemainingDiff(remaining, gearSet) then
-                onComplete(true)
-                return
-            end
-
-            if attempt < 6 then
-                check(attempt + 1)
-                return
-            end
-
-            PrintGearDiffFailures(remaining, {})
-            onComplete(false)
-        end)
-    end
-
-    check(1)
+    RetryGearVerification(gearSet, 1, {}, onComplete)
 end
 
 local function RunUpgradeStep(specID, configID, gearSet, options, onComplete)

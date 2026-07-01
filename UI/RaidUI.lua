@@ -413,14 +413,7 @@ function RaidUI.AppendDebugLines(lines, instanceInfo, specID)
     end
 end
 
-local eventFrame = CreateFrame("Frame")
-eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-eventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
-eventFrame:RegisterEvent("ZONE_CHANGED")
-eventFrame:RegisterEvent("UPDATE_INSTANCE_INFO")
-eventFrame:RegisterEvent("ENCOUNTER_END")
-
-eventFrame:SetScript("OnEvent", function(_, event, ...)
+local eventFrame = PromptUtils.RegisterPromptEvents(function(_, event, ...)
     if event == "ENCOUNTER_END" then
         local _, _, _, _, endStatus = ...
         if endStatus ~= 1 then
@@ -446,4 +439,12 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
     if event == "UPDATE_INSTANCE_INFO" then
         ScheduleEvaluate(0.1)
     end
-end)
+end, {
+    events = {
+        "PLAYER_ENTERING_WORLD",
+        "ZONE_CHANGED_NEW_AREA",
+        "ZONE_CHANGED",
+        "UPDATE_INSTANCE_INFO",
+        "ENCOUNTER_END",
+    },
+})

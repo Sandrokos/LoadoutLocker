@@ -4,7 +4,6 @@ local ContentPromptUI = {}
 LoadoutLocker.ContentPromptUI = ContentPromptUI
 
 function ContentPromptUI.Create(config)
-    local DB = LoadoutLocker.DB
     local Instance = LoadoutLocker.Instance
     local Loadout = LoadoutLocker.Loadout
     local PromptUtils = LoadoutLocker.PromptUtils
@@ -15,9 +14,6 @@ function ContentPromptUI.Create(config)
     local dismissedKey
     local lastContentKey
     local EVALUATE_DELAY = 0.5
-    local ScheduleEvaluate = PromptUtils.CreateScheduleEvaluate(function()
-        UI.Evaluate()
-    end)
 
     local function HidePrompt()
         if promptFrame then
@@ -154,17 +150,12 @@ function ContentPromptUI.Create(config)
         Print("Showing simulated " .. config.label .. " prompt for " .. content.name .. ".")
     end
 
-    local eventFrame = CreateFrame("Frame")
-    eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-    eventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
-    if config.extraEvents then
-        for _, event in ipairs(config.extraEvents) do
-            eventFrame:RegisterEvent(event)
-        end
-    end
-    eventFrame:SetScript("OnEvent", function()
-        ScheduleEvaluate(EVALUATE_DELAY)
-    end)
+    PromptUtils.RegisterZoneEvaluate(function()
+        UI.Evaluate()
+    end, {
+        delay = EVALUATE_DELAY,
+        extraEvents = config.extraEvents,
+    })
 
     return UI
 end
