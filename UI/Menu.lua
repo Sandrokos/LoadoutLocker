@@ -25,15 +25,15 @@ local HELP_TEXT = "Equip gear, select a talent loadout, then save with the talen
 local TAB_INTRO = {
     general = "LoadoutLocker saves your equipped gear to each talent loadout and swaps it when you change builds.",
     priority = "When upgrade prompts appear, higher stats at the top break ties between same item level and track.",
-    loadouts = "Manage saved gear sets for your current specialization, including ignored upgrade slots and copying between loadouts.",
-    dungeons = "Set a default talent loadout and optional per-dungeon overrides. Use the category buttons above to browse season and expansion dungeons.",
-    raids = "Set a default raid loadout and optional per-boss overrides. In-game prompts respect your lockout progress.",
-    delves = "Set a default delve loadout and optional per-delve overrides. Use the Midnight or TWW buttons above to browse delves.",
-    pvp = "Set a default PvP loadout and optional overrides for arenas and battlegrounds.",
+    loadouts = "Review talent loadouts across all specializations, manage saved gear sets, ignored upgrade slots, and copying between loadouts.",
+    dungeons = "Set a default talent loadout and optional per-dungeon overrides from any saved loadout (Spec-Talent name). Use the category buttons above to browse season and expansion dungeons.",
+    raids = "Set a default raid loadout and optional per-boss overrides from any saved loadout. In-game prompts respect your lockout progress and can switch specialization.",
+    delves = "Set a default delve loadout and optional per-delve overrides from any saved loadout. Use the Midnight or TWW buttons above to browse delves.",
+    pvp = "Set a default PvP loadout and optional overrides for arenas and battlegrounds from any saved loadout.",
 }
-local selectedManageConfigID
-local selectedCopySourceConfigID
-local selectedCopyTargetConfigID
+local selectedManageLoadoutKey
+local selectedCopySourceKey
+local selectedCopyTargetKey
 local RefreshUI = LoadoutLocker.RefreshUI
 local function RequestTabRefresh(tabID)
     if Shell.activeTab == tabID then
@@ -42,24 +42,43 @@ local function RequestTabRefresh(tabID)
         Shell:SelectTab(tabID)
     end
 end
-local function FindListEntry(list, configID)
+local function FindListEntryByKey(list, key)
     for _, entry in ipairs(list) do
-        if entry.configID == configID then
+        if entry.key == key then
             return entry
         end
     end
 end
-local function SelectFirstExcluding(list, excludeID)
+
+local function SelectFirstExcluding(list, excludeKey)
     for _, entry in ipairs(list) do
-        if entry.configID ~= excludeID then
-            return entry.configID
+        if entry.key ~= excludeKey then
+            return entry.key
         end
     end
 end
-local function GetOverrideDropdownState(overrideList, override)
-    return override and tostring(override) or "default", overrideList
+
+local function ResolveLoadoutDropdownValue(ref, emptyValue)
+    if not ref then
+        return emptyValue
+    end
+    if type(ref) == "table" then
+        return Loadout.EncodeLoadoutKey(ref.specID, ref.configID)
+    end
+    return tostring(ref)
 end
-local function BuildConfigDropdownList(entries, options)
+
+local function CopyDropdownList(source)
+    local copy = {}
+    if source then
+        for key, label in pairs(source) do
+            copy[key] = label
+        end
+    end
+    return copy
+end
+
+local function BuildLoadoutKeyDropdownList(entries, options)
     options = options or {}
     local list = {}
     if options.includeNone then
@@ -73,60 +92,87 @@ local function BuildConfigDropdownList(entries, options)
         return list
     end
     for _, entry in ipairs(entries) do
-        local name = entry.name
+        local name = entry.label
         if options.markSaved and entry.hasSavedGear then
             name = name .. " (saved)"
         end
-        list[tostring(entry.configID)] = name
+        list[entry.key] = name
     end
     return list
 end
-local function BuildLoadoutDropdownList(specID, includeNone, includeUseDefault, configList)
-    return BuildConfigDropdownList(
-        configList or (specID and Loadout.GetConfigList(specID) or {}),
-        { includeNone = includeNone, includeUseDefault = includeUseDefault }
+
+local function EnsureLoadoutInDropdown(list, ref)
+    if type(ref) ~= "table" or not ref.specID or not ref.configID then
+        return list
+    end
+
+    local key = Loadout.EncodeLoadoutKey(ref.specID, ref.configID)
+    if not list[key] then
+        list[key] = Loadout.FormatLoadoutLabel(ref.specID, Loadout.GetLoadoutName(ref.configID))
+    end
+    return list
+end
+
+local function GetOverrideDropdownState(overrideList, override)
+    if type(override) == "number" then
+        override = {
+            specID = Loadout.GetSpecID(),
+            configID = override,
+        }
+    end
+
+    local value = ResolveLoadoutDropdownValue(override, "default")
+    if type(override) ~= "table" or not override.specID or not override.configID then
+        return value, overrideList
+    end
+
+    local key = Loadout.EncodeLoadoutKey(override.specID, override.configID)
+    if overrideList[key] then
+        return value, overrideList
+    end
+
+    local list = CopyDropdownList(overrideList)
+    list[key] = Loadout.FormatLoadoutLabel(override.specID, Loadout.GetLoadoutName(override.configID))
+    return value, list
+end
+
+local function AddDefaultLoadoutDropdown(builder, getDefaultRef, setDefaultRef)
+    local defaultRef = getDefaultRef()
+    local list = BuildLoadoutKeyDropdownList(Loadout.GetAllConfigList(), { includeNone = true })
+    list = EnsureLoadoutInDropdown(list, defaultRef)
+    return Widgets.AddDropdown(
+        builder,
+        220,
+        list,
+        ResolveLoadoutDropdownValue(defaultRef, ""),
+        function(value)
+            setDefaultRef(value == "" and nil or value)
+        end
     )
 end
-local function AddDefaultLoadoutDropdown(builder, specID, configList, getDefault, setDefault)
-    if specID then
-        return Widgets.AddDropdown(
-            builder,
-            220,
-            BuildLoadoutDropdownList(specID, true, false, configList),
-            tostring(getDefault(specID) or ""),
-            function(value)
-                setDefault(specID, value ~= "" and tonumber(value) or nil)
-            end
-        )
-    end
-    Widgets.AddEmptyDropdown(builder, 220, "No specialization", true)
-    return builder
-end
-local function ResolveManageConfigID(savedSets)
+local function ResolveManageLoadoutKey(savedSets)
     if #savedSets == 0 then
         return nil
     end
-    if not selectedManageConfigID or not FindListEntry(savedSets, selectedManageConfigID) then
-        selectedManageConfigID = savedSets[1].configID
+    if not selectedManageLoadoutKey or not FindListEntryByKey(savedSets, selectedManageLoadoutKey) then
+        selectedManageLoadoutKey = savedSets[1].key
     end
-    return selectedManageConfigID
+    return selectedManageLoadoutKey
 end
-local function ResolveCopyConfigIDs(specID, savedSets)
-    local loadouts = Loadout.GetConfigList(specID)
+local function ResolveCopyLoadoutKeys(savedSets, allLoadouts)
     if #savedSets == 0 then
-        selectedCopySourceConfigID = nil
-    elseif not selectedCopySourceConfigID or not FindListEntry(savedSets, selectedCopySourceConfigID) then
-        selectedCopySourceConfigID = savedSets[1].configID
+        selectedCopySourceKey = nil
+    elseif not selectedCopySourceKey or not FindListEntryByKey(savedSets, selectedCopySourceKey) then
+        selectedCopySourceKey = savedSets[1].key
     end
-    if #loadouts == 0 then
-        selectedCopyTargetConfigID = nil
-    elseif not selectedCopyTargetConfigID
-        or not FindListEntry(loadouts, selectedCopyTargetConfigID)
-        or selectedCopyTargetConfigID == selectedCopySourceConfigID
+    if #allLoadouts == 0 then
+        selectedCopyTargetKey = nil
+    elseif not selectedCopyTargetKey
+        or not FindListEntryByKey(allLoadouts, selectedCopyTargetKey)
+        or selectedCopyTargetKey == selectedCopySourceKey
     then
-        selectedCopyTargetConfigID = SelectFirstExcluding(loadouts, selectedCopySourceConfigID)
+        selectedCopyTargetKey = SelectFirstExcluding(allLoadouts, selectedCopySourceKey)
     end
-    return loadouts
 end
 local function BuildGeneralTab(content)
     Shell:ClearScroll(content.scrollChild)
@@ -202,15 +248,16 @@ local function BuildPriorityTab(content)
     end)
     Widgets.FinishBuilder(builder)
 end
-local function BuildLoadoutOverviewRows(loadouts, specID, activeConfigID)
+local function BuildLoadoutOverviewRows(savedSets)
     local rows = {}
-    for _, entry in ipairs(loadouts) do
-        local dbEntry = DB:GetEntry(specID, entry.configID)
+    local currentSpecID = Loadout.GetSpecID()
+    local activeConfigID = currentSpecID and Loadout.GetLoadoutConfigID(currentSpecID)
+    for _, entry in ipairs(savedSets) do
         rows[#rows + 1] = {
+            specName = entry.specName,
             name = entry.name,
-            equipmentSetName = dbEntry and dbEntry.equipmentSetName or "",
-            hasSavedGear = entry.hasSavedGear,
-            isActive = entry.configID == activeConfigID,
+            equipmentSetName = entry.equipmentSetName or "",
+            isActive = entry.specID == currentSpecID and entry.configID == activeConfigID,
         }
     end
     return rows
@@ -218,22 +265,15 @@ end
 local function BuildLoadoutsTab(content)
     Shell:ClearScroll(content.scrollChild)
     local builder = Widgets.NewBuilder(content.scrollChild)
-    local specID = Loadout.GetSpecID()
-    if not specID then
-        Widgets.AddTabIntro(builder, TAB_INTRO.loadouts)
-        Widgets.AddLabel(builder, "No specialization available.")
-        Widgets.FinishBuilder(builder)
-        return
-    end
-    local loadouts = Loadout.GetConfigList(specID)
-    local activeConfigID = Loadout.GetLoadoutConfigID(specID)
     Widgets.AddTabIntro(builder, TAB_INTRO.loadouts)
+    local savedSets = Loadout.GetAllSavedLoadoutList()
     Widgets.AddHeading(builder, "Overview")
-    Widgets.AddLoadoutOverviewTable(builder, BuildLoadoutOverviewRows(loadouts, specID, activeConfigID))
+    Widgets.AddLoadoutOverviewTable(builder, BuildLoadoutOverviewRows(savedSets))
     Widgets.AddGap(builder, 16)
-    local savedSets = DB:GetSavedGearSetList(specID)
-    local manageConfigID = ResolveManageConfigID(savedSets)
-    loadouts = ResolveCopyConfigIDs(specID, savedSets)
+    local manageKey = ResolveManageLoadoutKey(savedSets)
+    local manageSpecID, manageConfigID = Loadout.DecodeLoadoutKey(manageKey)
+    local allLoadouts = Loadout.GetAllConfigList()
+    ResolveCopyLoadoutKeys(savedSets, allLoadouts)
     Widgets.AddHeading(builder, "Manage saved gear set")
     if #savedSets == 0 then
         Widgets.AddEmptyDropdown(builder, 220, "No saved gear sets")
@@ -241,24 +281,24 @@ local function BuildLoadoutsTab(content)
         Widgets.AddDropdownButtonRow(
             builder,
             220,
-            BuildConfigDropdownList(savedSets),
-            tostring(manageConfigID),
+            BuildLoadoutKeyDropdownList(savedSets),
+            manageKey,
             function(value)
-                selectedManageConfigID = tonumber(value)
+                selectedManageLoadoutKey = value
                 RequestTabRefresh("loadouts")
             end,
             "Delete Gear Set",
             120,
             function()
-                if manageConfigID and Gear.DeleteSavedGear(manageConfigID) then
+                if manageSpecID and manageConfigID and Gear.DeleteSavedGear(manageConfigID, manageSpecID) then
                     RequestTabRefresh("loadouts")
                 end
             end,
-            not manageConfigID
+            not manageKey
         )
     end
     Widgets.AddLabel(builder, "Ignored upgrade slots")
-    local slots = manageConfigID and DB:GetIgnoredUpgradeSlotList(specID, manageConfigID) or {}
+    local slots = manageSpecID and manageConfigID and DB:GetIgnoredUpgradeSlotList(manageSpecID, manageConfigID) or {}
     local ignoredPanelWidth = math.floor((builder.parent:GetWidth() - 8) / 2)
     Widgets.AddInsetPanel(builder, function(panel)
         if #slots == 0 then
@@ -266,8 +306,8 @@ local function BuildLoadoutsTab(content)
         else
             for _, slot in ipairs(slots) do
                 Widgets.AddSlotClearRow(panel, C.GetSlotLabel(slot), function()
-                    if manageConfigID then
-                        DB:ClearIgnoredUpgradeSlot(specID, manageConfigID, slot)
+                    if manageSpecID and manageConfigID then
+                        DB:ClearIgnoredUpgradeSlot(manageSpecID, manageConfigID, slot)
                         RequestTabRefresh("loadouts")
                     end
                 end)
@@ -276,31 +316,40 @@ local function BuildLoadoutsTab(content)
     end, 40, ignoredPanelWidth)
     Widgets.AddGap(builder, 8)
     Widgets.AddButton(builder, "Clear All Ignored", 150, function()
-        if manageConfigID and DB:ClearAllIgnoredUpgradeSlots(specID, manageConfigID) then
+        if manageSpecID and manageConfigID and DB:ClearAllIgnoredUpgradeSlots(manageSpecID, manageConfigID) then
             RequestTabRefresh("loadouts")
         end
     end, #slots == 0)
     Widgets.AddGap(builder, 24)
     Widgets.AddHeading(builder, "Copy gear set")
-    local canCopy = selectedCopySourceConfigID
-        and selectedCopyTargetConfigID
-        and selectedCopySourceConfigID ~= selectedCopyTargetConfigID
+    local copySourceSpecID, copySourceConfigID = Loadout.DecodeLoadoutKey(selectedCopySourceKey)
+    local copyTargetSpecID, copyTargetConfigID = Loadout.DecodeLoadoutKey(selectedCopyTargetKey)
+    local canCopy = copySourceSpecID
+        and copySourceConfigID
+        and copyTargetSpecID
+        and copyTargetConfigID
+        and selectedCopySourceKey ~= selectedCopyTargetKey
     if #savedSets == 0 then
         Widgets.AddEmptyDropdown(builder, 220, "No saved gear sets")
     else
         Widgets.AddDropdownButtonRow(
             builder,
             220,
-            BuildConfigDropdownList(savedSets),
-            tostring(selectedCopySourceConfigID),
+            BuildLoadoutKeyDropdownList(savedSets),
+            selectedCopySourceKey,
             function(value)
-                selectedCopySourceConfigID = tonumber(value)
+                selectedCopySourceKey = value
                 RequestTabRefresh("loadouts")
             end,
             "Copy Gear Set",
             120,
             function()
-                if Gear.CopyGearSetToLoadout(selectedCopySourceConfigID, selectedCopyTargetConfigID) then
+                if Gear.CopyGearSetToLoadout(
+                    copySourceConfigID,
+                    copyTargetConfigID,
+                    copySourceSpecID,
+                    copyTargetSpecID
+                ) then
                     RefreshUI()
                     RequestTabRefresh("loadouts")
                 end
@@ -309,11 +358,11 @@ local function BuildLoadoutsTab(content)
         )
     end
     Widgets.AddLabel(builder, "To")
-    if #loadouts == 0 then
+    if #allLoadouts == 0 then
         Widgets.AddEmptyDropdown(builder, 220, "No loadouts found")
     else
-        Widgets.AddDropdown(builder, 220, BuildConfigDropdownList(loadouts, { markSaved = true }), tostring(selectedCopyTargetConfigID), function(value)
-            selectedCopyTargetConfigID = tonumber(value)
+        Widgets.AddDropdown(builder, 220, BuildLoadoutKeyDropdownList(allLoadouts, { markSaved = true }), selectedCopyTargetKey, function(value)
+            selectedCopyTargetKey = value
             RequestTabRefresh("loadouts")
         end)
     end
@@ -322,12 +371,12 @@ end
 local function IsAssignmentSectionBuildValid(token, tabID)
     return Shell.activeTab == tabID and token == subTabBuildToken[tabID]
 end
-local function BuildAssignmentSection(scrollChild, specID, items, overrideList, token, tabID, assignmentKey, getAssignments, clearConfigID, setConfigID, onChanged)
+local function BuildAssignmentSection(scrollChild, items, overrideList, token, tabID, assignmentKey, getAssignments, clearLoadoutRef, setLoadoutRef, onChanged)
     if not IsAssignmentSectionBuildValid(token, tabID) then
         return
     end
     local builder = Widgets.NewBuilder(scrollChild)
-    local assignments = specID and getAssignments(specID) or nil
+    local assignments = getAssignments()
     local overrides = assignments and assignments[assignmentKey]
     for _, item in ipairs(items) do
         if not IsAssignmentSectionBuildValid(token, tabID) then
@@ -341,9 +390,9 @@ local function BuildAssignmentSection(scrollChild, specID, items, overrideList, 
             end,
             function(key)
                 if key == "default" then
-                    clearConfigID(specID, item.key)
+                    clearLoadoutRef(item.key)
                 else
-                    setConfigID(specID, item.key, tonumber(key))
+                    setLoadoutRef(item.key, key)
                 end
                 if onChanged then
                     onChanged()
@@ -353,7 +402,7 @@ local function BuildAssignmentSection(scrollChild, specID, items, overrideList, 
     end
     Widgets.FinishBuilder(builder)
 end
-local function SelectAssignmentSection(content, section, specID, overrideList, opts)
+local function SelectAssignmentSection(content, section, overrideList, opts)
     opts.bumpToken()
     local token = opts.getToken()
     Shell:ClearScroll(content.scrollChild)
@@ -366,15 +415,14 @@ local function SelectAssignmentSection(content, section, specID, overrideList, o
         end
         BuildAssignmentSection(
             content.scrollChild,
-            specID,
             section[opts.itemsKey],
             overrideList,
             token,
             opts.tabID,
             opts.assignmentKey,
             opts.getAssignments,
-            opts.clearConfigID,
-            opts.setConfigID,
+            opts.clearLoadoutRef,
+            opts.setLoadoutRef,
             opts.onChanged
         )
     end
@@ -388,20 +436,20 @@ local SUB_TAB_CONFIG = {
         itemsKey = "dungeons",
         assignmentKey = "dungeons",
         getSections = Dungeons.GetMenuSections,
-        getDefaultConfigID = function(spec)
-            return DB:GetDungeonDefaultConfigID(spec)
+        getDefaultLoadoutRef = function()
+            return DB:GetDungeonDefaultLoadoutRef()
         end,
-        setDefaultConfigID = function(spec, value)
-            DB:SetDungeonDefaultConfigID(spec, value)
+        setDefaultLoadoutRef = function(value)
+            DB:SetDungeonDefaultConfigID(nil, value)
         end,
-        getAssignments = function(spec)
-            return DB:GetDungeonAssignmentsIfExists(spec)
+        getAssignments = function()
+            return DB:GetDungeonAssignmentsIfExists()
         end,
-        clearConfigID = function(spec, key)
-            DB:ClearDungeonConfigID(spec, key)
+        clearLoadoutRef = function(key)
+            DB:ClearDungeonConfigID(nil, key)
         end,
-        setConfigID = function(spec, key, value)
-            DB:SetDungeonConfigID(spec, key, value)
+        setLoadoutRef = function(key, value)
+            DB:SetDungeonConfigID(nil, key, value)
         end,
         onAssignmentChanged = function()
             RequestTabRefresh("dungeons")
@@ -415,20 +463,20 @@ local SUB_TAB_CONFIG = {
         itemsKey = "delves",
         assignmentKey = "delves",
         getSections = Delves.GetMenuSections,
-        getDefaultConfigID = function(spec)
-            return DB:GetDelveDefaultConfigID(spec)
+        getDefaultLoadoutRef = function()
+            return DB:GetDelveDefaultLoadoutRef()
         end,
-        setDefaultConfigID = function(spec, value)
-            DB:SetDelveDefaultConfigID(spec, value)
+        setDefaultLoadoutRef = function(value)
+            DB:SetDelveDefaultConfigID(nil, value)
         end,
-        getAssignments = function(spec)
-            return DB:GetDelveAssignmentsIfExists(spec)
+        getAssignments = function()
+            return DB:GetDelveAssignmentsIfExists()
         end,
-        clearConfigID = function(spec, key)
-            DB:ClearDelveConfigID(spec, key)
+        clearLoadoutRef = function(key)
+            DB:ClearDelveConfigID(nil, key)
         end,
-        setConfigID = function(spec, key, value)
-            DB:SetDelveConfigID(spec, key, value)
+        setLoadoutRef = function(key, value)
+            DB:SetDelveConfigID(nil, key, value)
         end,
     },
 }
@@ -469,8 +517,8 @@ local function LayoutSubTabButtons(subBar, sections, subBarRows, buttons, onClic
         rowX[row] = rowX[row] + addButton(index, section, rowX[row], rowY[row])
     end
 end
-local function SelectSubTabSection(content, section, specID, overrideList, config)
-    SelectAssignmentSection(content, section, specID, overrideList, {
+local function SelectSubTabSection(content, section, overrideList, config)
+    SelectAssignmentSection(content, section, overrideList, {
         tabID = config.tabID,
         itemsKey = config.itemsKey,
         assignmentKey = config.assignmentKey,
@@ -485,8 +533,8 @@ local function SelectSubTabSection(content, section, specID, overrideList, confi
             selectedSubTabSectionKey[config.tabID] = key
         end,
         getAssignments = config.getAssignments,
-        clearConfigID = config.clearConfigID,
-        setConfigID = config.setConfigID,
+        clearLoadoutRef = config.clearLoadoutRef,
+        setLoadoutRef = config.setLoadoutRef,
         onChanged = config.onAssignmentChanged,
     })
 end
@@ -494,17 +542,15 @@ local function BuildSubTabAssignmentsTab(content, config)
     local tabID = config.tabID
     Shell:ClearFrame(content.subBar)
     Shell:ClearFrame(content.header)
-    local specID = Loadout.GetSpecID()
-    local configList = specID and Loadout.GetConfigList(specID) or nil
-    local overrideList = specID and BuildLoadoutDropdownList(specID, false, true, configList) or nil
+    local overrideList = BuildLoadoutKeyDropdownList(Loadout.GetAllConfigList(), { includeUseDefault = true })
     local sections = config.getSections()
     LayoutSubTabButtons(content.subBar, sections, config.subBarRows, subTabButtons[tabID], function(section)
-        SelectSubTabSection(content, section, specID, overrideList, config)
+        SelectSubTabSection(content, section, overrideList, config)
     end)
     local headerBuilder = Widgets.NewBuilder(content.header)
     Widgets.AddLabel(headerBuilder, config.intro)
     Widgets.AddLabel(headerBuilder, config.defaultLoadoutLabel)
-    AddDefaultLoadoutDropdown(headerBuilder, specID, configList, config.getDefaultConfigID, config.setDefaultConfigID)
+    AddDefaultLoadoutDropdown(headerBuilder, config.getDefaultLoadoutRef, config.setDefaultLoadoutRef)
     Widgets.FinishBuilder(headerBuilder)
     content.header:SetHeight(math.max(headerBuilder.y + 8, 1))
     Shell:LayoutSubTabContent(content, config.subBarRows)
@@ -519,7 +565,7 @@ local function BuildSubTabAssignmentsTab(content, config)
         end
     end
     if activeSection then
-        SelectSubTabSection(content, activeSection, specID, overrideList, config)
+        SelectSubTabSection(content, activeSection, overrideList, config)
     end
 end
 local function BuildDungeonsTab(content)
@@ -528,21 +574,19 @@ end
 local function BuildRaidsTab(content)
     Shell:ClearScroll(content.scrollChild)
     local builder = Widgets.NewBuilder(content.scrollChild)
-    local specID = Loadout.GetSpecID()
-    local configList = specID and Loadout.GetConfigList(specID) or nil
     Widgets.AddTabIntro(builder, TAB_INTRO.raids)
     Widgets.AddLabel(builder, "Default raid loadout")
-    AddDefaultLoadoutDropdown(builder, specID, configList, function(spec)
-        return DB:GetRaidDefaultConfigID(spec)
-    end, function(spec, value)
-        DB:SetRaidDefaultConfigID(spec, value)
+    AddDefaultLoadoutDropdown(builder, function()
+        return DB:GetRaidDefaultLoadoutRef()
+    end, function(value)
+        DB:SetRaidDefaultConfigID(nil, value)
     end)
     Widgets.AddGap(builder, 10)
-    local overrideList = specID and BuildLoadoutDropdownList(specID, false, true, configList) or nil
+    local overrideList = BuildLoadoutKeyDropdownList(Loadout.GetAllConfigList(), { includeUseDefault = true })
     for _, section in ipairs(Raids.GetMenuSections()) do
         Widgets.AddHeading(builder, section.header)
         for raidIndex, raid in ipairs(section.raids) do
-            local raidAssignment = specID and DB:GetRaidAssignmentIfExists(specID, raid.key) or nil
+            local raidAssignment = DB:GetRaidAssignmentIfExists(nil, raid.key)
             if raidIndex > 1 then
                 Widgets.AddSeparator(builder)
                 Widgets.AddGap(builder, 6)
@@ -557,9 +601,9 @@ local function BuildRaidsTab(content)
                     end,
                     function(key)
                         if key == "default" then
-                            DB:ClearRaidBossConfigID(specID, raid.key, boss.key)
+                            DB:ClearRaidBossConfigID(nil, raid.key, boss.key)
                         else
-                            DB:SetRaidBossConfigID(specID, raid.key, boss.key, tonumber(key))
+                            DB:SetRaidBossConfigID(nil, raid.key, boss.key, key)
                         end
                     end
                 )
@@ -568,12 +612,12 @@ local function BuildRaidsTab(content)
     end
     Widgets.FinishBuilder(builder)
 end
-local function BuildContentAssignmentsTab(builder, specID, configList, intro, getDefaultConfigID, setDefaultConfigID, getSections, getOverride, clearConfigID, setConfigID, collectionKey)
+local function BuildContentAssignmentsTab(builder, intro, getDefaultLoadoutRef, setDefaultLoadoutRef, getSections, getOverride, clearLoadoutRef, setLoadoutRef, collectionKey)
     Widgets.AddTabIntro(builder, intro)
     Widgets.AddLabel(builder, "Default loadout")
-    AddDefaultLoadoutDropdown(builder, specID, configList, getDefaultConfigID, setDefaultConfigID)
+    AddDefaultLoadoutDropdown(builder, getDefaultLoadoutRef, setDefaultLoadoutRef)
     Widgets.AddGap(builder, 10)
-    local overrideList = specID and BuildLoadoutDropdownList(specID, false, true, configList) or nil
+    local overrideList = BuildLoadoutKeyDropdownList(Loadout.GetAllConfigList(), { includeUseDefault = true })
     for _, section in ipairs(getSections()) do
         Widgets.AddHeading(builder, section.header)
         for _, item in ipairs(section[collectionKey]) do
@@ -581,13 +625,13 @@ local function BuildContentAssignmentsTab(builder, specID, configList, intro, ge
                 builder,
                 item.name,
                 function()
-                    return GetOverrideDropdownState(overrideList, specID and getOverride(specID, item.key))
+                    return GetOverrideDropdownState(overrideList, getOverride(item.key))
                 end,
                 function(key)
                     if key == "default" then
-                        clearConfigID(specID, item.key)
+                        clearLoadoutRef(item.key)
                     else
-                        setConfigID(specID, item.key, tonumber(key))
+                        setLoadoutRef(item.key, key)
                     end
                 end
             )
@@ -600,30 +644,26 @@ local function BuildDelvesTab(content)
 end
 local function BuildPvPTab(content)
     Shell:ClearScroll(content.scrollChild)
-    local specID = Loadout.GetSpecID()
-    local configList = specID and Loadout.GetConfigList(specID) or nil
     local builder = Widgets.NewBuilder(content.scrollChild)
     BuildContentAssignmentsTab(
         builder,
-        specID,
-        configList,
         TAB_INTRO.pvp,
-        function(spec)
-            return DB:GetPvPDefaultConfigID(spec)
+        function()
+            return DB:GetPvPDefaultLoadoutRef()
         end,
-        function(spec, value)
-            DB:SetPvPDefaultConfigID(spec, value)
+        function(value)
+            DB:SetPvPDefaultConfigID(nil, value)
         end,
         PvP.GetMenuSections,
-        function(spec, key)
-            local assignments = DB:GetPvPAssignments(spec)
-            return assignments and assignments.modes[key]
+        function(key)
+            local store = DB:GetPvPAssignments()
+            return store and store.modes and store.modes[key]
         end,
-        function(spec, key)
-            DB:ClearPvPConfigID(spec, key)
+        function(key)
+            DB:ClearPvPConfigID(nil, key)
         end,
-        function(spec, key, value)
-            DB:SetPvPConfigID(spec, key, value)
+        function(key, value)
+            DB:SetPvPConfigID(nil, key, value)
         end,
         "modes"
     )
@@ -652,7 +692,17 @@ local function OnTabSelected(content, tabID)
 end
 Shell:SetOnTabSelected(OnTabSelected)
 function Menu.Show(tabID)
-    selectedManageConfigID = Loadout.GetLoadoutConfigID()
+    local savedSets = Loadout.GetAllSavedLoadoutList()
+    if #savedSets > 0 then
+        local specID = Loadout.GetSpecID()
+        local configID = specID and Loadout.GetLoadoutConfigID(specID)
+        local activeKey = Loadout.EncodeLoadoutKey(specID, configID)
+        if FindListEntryByKey(savedSets, activeKey) then
+            selectedManageLoadoutKey = activeKey
+        else
+            selectedManageLoadoutKey = savedSets[1].key
+        end
+    end
     Shell:Show(tabID or "general")
 end
 function Menu.IsShown()

@@ -573,8 +573,9 @@ function Widgets.AddAssignmentRow(builder, labelText, getState, onSelect)
     return dropdown
 end
 
-local OVERVIEW_NAME_WIDTH = 0.46
-local OVERVIEW_EM_WIDTH = 0.38
+local OVERVIEW_SPEC_WIDTH = 0.20
+local OVERVIEW_NAME_WIDTH = 0.38
+local OVERVIEW_EM_WIDTH = 0.42
 local OVERVIEW_MAX_LIST_HEIGHT = ROW_HEIGHT * 6 + 10
 
 local function AddOverviewColumnText(row, text, x, width, fontObject, color)
@@ -590,27 +591,15 @@ local function AddOverviewColumnText(row, text, x, width, fontObject, color)
     return label
 end
 
-local function AddOverviewGearCheck(row, x, width, saved)
-    local icon = row:CreateTexture(nil, "ARTWORK")
-    icon:SetSize(16, 16)
-    icon:SetPoint("LEFT", row, "LEFT", x + math.max(0, math.floor((width - 16) / 2)), 0)
-    if saved then
-        icon:SetTexture("Interface\\RaidFrame\\ReadyCheck-Ready")
-    else
-        icon:SetTexture("Interface\\RaidFrame\\ReadyCheck-NotReady")
-        icon:SetAlpha(0.35)
-    end
-end
-
 function Widgets.AddLoadoutOverviewTable(builder, rows)
     local parent = builder.parent
     local listWidth = parent:GetWidth() - SCROLL_RIGHT_INSET - 4
+    local specWidth = math.floor(listWidth * OVERVIEW_SPEC_WIDTH)
     local nameWidth = math.floor(listWidth * OVERVIEW_NAME_WIDTH)
-    local emWidth = math.floor(listWidth * OVERVIEW_EM_WIDTH)
-    local gearWidth = listWidth - nameWidth - emWidth
-    local nameX = 4
+    local emWidth = listWidth - specWidth - nameWidth - 8
+    local specX = 4
+    local nameX = specX + specWidth
     local emX = nameX + nameWidth
-    local gearX = emX + emWidth
     local headerColor = Style.title
     local separatorGap = 12
     local bottomGap = 8
@@ -632,9 +621,9 @@ function Widgets.AddLoadoutOverviewTable(builder, rows)
     local header = CreateFrame("Frame", nil, block)
     header:SetPoint("TOPLEFT", block, "TOPLEFT", 0, 0)
     header:SetSize(listWidth, ROW_HEIGHT)
+    AddOverviewColumnText(header, "Spec", specX, specWidth, "GameFontNormalSmall", headerColor)
     AddOverviewColumnText(header, "Talent name", nameX, nameWidth, "GameFontNormalSmall", headerColor)
     AddOverviewColumnText(header, "Equipment set", emX, emWidth, "GameFontNormalSmall", headerColor)
-    AddOverviewColumnText(header, "Gear saved", gearX, gearWidth, "GameFontNormalSmall", headerColor)
 
     local line = block:CreateTexture(nil, "ARTWORK")
     line:SetColorTexture(unpack(Style.separator))
@@ -653,7 +642,7 @@ function Widgets.AddLoadoutOverviewTable(builder, rows)
         emptyLabel:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 4, -innerY)
         emptyLabel:SetWidth(listWidth - 8)
         emptyLabel:SetJustifyH("LEFT")
-        emptyLabel:SetText("No loadouts found.")
+        emptyLabel:SetText("No saved gear sets.")
         innerY = innerY + ROW_HEIGHT
     else
         for _, rowData in ipairs(rows) do
@@ -666,6 +655,7 @@ function Widgets.AddLoadoutOverviewTable(builder, rows)
                 nameText = nameText .. " (active)"
             end
             local nameColor = rowData.isActive and { 1, 0.82, 0.35 } or nil
+            AddOverviewColumnText(row, rowData.specName or "—", specX, specWidth, "GameFontHighlightSmall", nameColor)
             AddOverviewColumnText(row, nameText, nameX, nameWidth, "GameFontHighlight", nameColor)
 
             local emName = rowData.equipmentSetName
@@ -673,8 +663,6 @@ function Widgets.AddLoadoutOverviewTable(builder, rows)
                 emName = "—"
             end
             AddOverviewColumnText(row, emName, emX, emWidth, "GameFontHighlightSmall")
-
-            AddOverviewGearCheck(row, gearX, gearWidth, rowData.hasSavedGear)
 
             innerY = innerY + ROW_HEIGHT + 2
         end

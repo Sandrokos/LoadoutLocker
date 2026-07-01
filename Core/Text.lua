@@ -1,5 +1,9 @@
 LoadoutLocker = LoadoutLocker or {}
 
+function LoadoutLocker.Print(msg)
+    print("|cff00ccffLoadoutLocker:|r " .. tostring(msg))
+end
+
 local Text = {}
 LoadoutLocker.Text = Text
 

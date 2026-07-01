@@ -17,8 +17,8 @@ local DelveUI = ContentPromptUI.Create({
     resolveCurrent = function(instanceInfo)
         return Delves.ResolveCurrent(instanceInfo)
     end,
-    getConfigID = function(specID, key)
-        return DB:GetDelveConfigID(specID, key)
+    getLoadoutRef = function(contentKey)
+        return DB:GetDelveLoadoutRef(contentKey)
     end,
     getByKey = function(key)
         return Delves.GetByKey(key)

@@ -3,7 +3,9 @@ local ADDON_NAME = ...
 local Print = LoadoutLocker.Print
 local DB = LoadoutLocker.DB
 local Gear = LoadoutLocker.Gear
+local Loadout = LoadoutLocker.Loadout
 local Menu = LoadoutLocker.Menu
+local PromptUtils = LoadoutLocker.PromptUtils
 local DungeonUI = LoadoutLocker.DungeonUI
 local RaidUI = LoadoutLocker.RaidUI
 local DelveUI = LoadoutLocker.DelveUI
@@ -83,12 +85,31 @@ frame:SetScript("OnEvent", function(_, event, arg1)
         DB:Initialize()
         Menu.RegisterWithSettings()
         LoadoutLocker.BugReportUI.InstallErrorCapture()
-    elseif (event == "PLAYER_LOGIN" or event == "TRAIT_CONFIG_LIST_UPDATED") and not loginSynced then
-        if LoadoutLocker.Loadout.RecordCurrent() then
+    elseif event == "PLAYER_LOGIN" then
+        if not loginSynced and Loadout.RecordCurrent() then
+            loginSynced = true
+        end
+    elseif event == "TRAIT_CONFIG_LIST_UPDATED" then
+        Loadout.InvalidateListCache()
+        if not loginSynced and Loadout.RecordCurrent() then
             loginSynced = true
         end
     elseif event == "TRAIT_CONFIG_UPDATED" then
-        Gear.ScheduleLoadoutGearApply()
+        Loadout.InvalidateListCache()
+        local specID = Loadout.GetSpecID()
+        local configID = specID and Loadout.GetLoadoutConfigID(specID)
+        local awaiting = Loadout.GetAwaitingTalentSwitchAfterSpec()
+        if awaiting then
+            if specID == awaiting.specID and configID == awaiting.configID then
+                Loadout.ClearAwaitingTalentSwitchAfterSpec()
+                Gear.OnTalentSwitchAfterSpecComplete()
+            end
+        else
+            Gear.ScheduleLoadoutGearApply()
+        end
+        if specID and configID then
+            PromptUtils.OnPromptLoadoutTalentsApplied(specID, configID)
+        end
     elseif event == "ACTIVE_PLAYER_SPECIALIZATION_CHANGED" then
         Gear.OnSpecChanged()
     end

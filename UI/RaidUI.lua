@@ -17,6 +17,7 @@ local dismissedRaidKey
 local lastRaidKey
 local simulatedRaidKey
 local MAX_CHOICES = 8
+local ENTER_EVALUATE_DELAY = 2.0
 
 local DEFAULT_RAID_SIM_KEY = "march_on_quel_danas"
 
@@ -25,7 +26,6 @@ local RAID_SIM_ALIASES = {
     quel = DEFAULT_RAID_SIM_KEY,
     ["quel'danas"] = DEFAULT_RAID_SIM_KEY,
     ["quel danas"] = DEFAULT_RAID_SIM_KEY,
-    sporefall = "sporefall",
     rotmire = "sporefall",
 }
 
@@ -42,17 +42,6 @@ end
 local function CreateChoiceButton(parent, index)
     local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     button:SetSize(300, 24)
-    button:SetScript("OnClick", function(self)
-        if not self.configID or not self.specID then
-            return
-        end
-
-        if PromptUtils.SwitchToLoadout(self.configID, self.specID) then
-            dismissedRaidKey = self.raidKey
-            HidePrompt()
-        end
-    end)
-
     choiceButtons[index] = button
     return button
 end
@@ -100,8 +89,15 @@ local function LayoutChoiceButtons(frame, choices)
         button.configID = choice.configID
         button.specID = choice.specID
         button.raidKey = choice.raidKey
-        button:Show()
-        button:Enable()
+        if PromptUtils.ConfigureLoadoutSwitchButton(button, choice.specID, choice.configID, function()
+            dismissedRaidKey = choice.raidKey
+            HidePrompt()
+        end) then
+            button:Show()
+            button:Enable()
+        else
+            button:Hide()
+        end
     end
 
     frame:SetHeight(108 + math.max(#choices, 1) * spacing)
@@ -127,63 +123,55 @@ function RaidUI.ShowPrompt(raidKey, raid, choices, options)
     local frame = EnsurePromptFrame()
     frame.raidKey = raidKey
     frame.raidName:SetText(raid and raid.name or raidKey)
+    frame.raidName:Show()
     if #choices == 1 then
         frame.help:SetText("Switch to your assigned loadout:")
     else
         frame.help:SetText("Remaining bosses need different loadouts:")
     end
+    frame.help:Show()
+    frame.isLoading = nil
+    PromptUtils.HidePromptLoadingIndicator(frame)
     LayoutChoiceButtons(frame, choices)
     frame:Show()
 end
 
-local function BuildChoiceLabel(bossNames, configID)
-    local loadoutName = Loadout.GetLoadoutName(configID)
-    return table.concat(bossNames, ", ") .. "  \194\187  " .. loadoutName
+local function BuildChoiceLabel(bossNames, specID, configID)
+    local loadoutLabel = Loadout.FormatLoadoutLabel(specID, Loadout.GetLoadoutName(configID))
+    return table.concat(bossNames, ", ") .. "  \194\187  " .. loadoutLabel
 end
 
-local function ConfigIDsEqual(a, b)
-    if not a or not b then
-        return false
-    end
-    return tonumber(a) == tonumber(b)
-end
-
-local function GetPromptBosses(raid, killStates)
-    local alive = Raids.GetAliveBosses(raid, killStates)
-    if #alive > 0 then
-        return alive
-    end
-    return raid.bosses
-end
-
-local function BuildGroupedPromptChoices(specID, raidKey, raid, bosses)
-    local currentConfigID = Loadout.GetLoadoutConfigID(specID)
+local function BuildGroupedPromptChoices(raidKey, raid, bosses)
     local groups = {}
     local order = {}
 
     for _, boss in ipairs(bosses) do
-        local configID = DB:GetRaidBossConfigID(specID, raidKey, boss.key)
-        if configID then
-            configID = tonumber(configID)
-            local group = groups[configID]
+        local ref = DB:GetRaidBossLoadoutRef(raidKey, boss.key)
+        if ref then
+            local key = Loadout.EncodeLoadoutKey(ref.specID, ref.configID)
+            local group = groups[key]
             if not group then
-                group = { configID = configID, bossNames = {} }
-                groups[configID] = group
-                order[#order + 1] = configID
+                group = {
+                    specID = ref.specID,
+                    configID = ref.configID,
+                    bossNames = {},
+                }
+                groups[key] = group
+                order[#order + 1] = key
             end
             group.bossNames[#group.bossNames + 1] = boss.name
         end
     end
 
     if #order == 0 then
-        local defaultConfigID = tonumber(DB:GetRaidDefaultConfigID(specID))
-        if defaultConfigID and not ConfigIDsEqual(defaultConfigID, currentConfigID) then
+        local defaultRef = DB:GetRaidDefaultLoadoutRef()
+        if defaultRef and not Loadout.IsAssignedLoadoutActive(defaultRef.specID, defaultRef.configID) then
             return {
                 {
-                    configID = defaultConfigID,
-                    specID = specID,
+                    configID = defaultRef.configID,
+                    specID = defaultRef.specID,
                     raidKey = raidKey,
-                    label = BuildChoiceLabel({ raid.name }, defaultConfigID),
+                    label = BuildChoiceLabel({ raid.name }, defaultRef.specID, defaultRef.configID),
                 },
             }
         end
@@ -191,14 +179,14 @@ local function BuildGroupedPromptChoices(specID, raidKey, raid, bosses)
     end
 
     local choices = {}
-    for _, configID in ipairs(order) do
-        if not ConfigIDsEqual(configID, currentConfigID) then
-            local group = groups[configID]
+    for _, key in ipairs(order) do
+        local group = groups[key]
+        if not Loadout.IsAssignedLoadoutActive(group.specID, group.configID) then
             choices[#choices + 1] = {
-                configID = configID,
-                specID = specID,
+                configID = group.configID,
+                specID = group.specID,
                 raidKey = raidKey,
-                label = BuildChoiceLabel(group.bossNames, configID),
+                label = BuildChoiceLabel(group.bossNames, group.specID, group.configID),
             }
         end
     end
@@ -224,34 +212,40 @@ local function NormalizeSimRaidKey(key)
     return nil
 end
 
-local function HasPromptableRaidAssignments(specID, raidKey, raid)
-    local currentConfigID = Loadout.GetLoadoutConfigID(specID)
+local function GetPromptBosses(raid, killStates)
+    local alive = Raids.GetAliveBosses(raid, killStates)
+    if #alive > 0 then
+        return alive
+    end
+    return raid.bosses
+end
 
+local function HasPromptableRaidAssignments(raidKey, raid)
     for _, boss in ipairs(raid.bosses) do
-        local configID = DB:GetRaidBossConfigID(specID, raidKey, boss.key)
-        if configID and not ConfigIDsEqual(configID, currentConfigID) then
+        local ref = DB:GetRaidBossLoadoutRef(raidKey, boss.key)
+        if ref and not Loadout.IsAssignedLoadoutActive(ref.specID, ref.configID) then
             return true
         end
     end
 
-    local defaultConfigID = DB:GetRaidDefaultConfigID(specID)
-    return defaultConfigID and not ConfigIDsEqual(defaultConfigID, currentConfigID)
+    local defaultRef = DB:GetRaidDefaultLoadoutRef()
+    return defaultRef and not Loadout.IsAssignedLoadoutActive(defaultRef.specID, defaultRef.configID)
 end
 
-local function FindRaidKeyForSimulation(specID, preferredKey)
+local function FindRaidKeyForSimulation(preferredKey)
     preferredKey = NormalizeSimRaidKey(preferredKey)
     if preferredKey then
         return preferredKey
     end
 
     local marchRaid = Raids.GetByKey(DEFAULT_RAID_SIM_KEY)
-    if marchRaid and HasPromptableRaidAssignments(specID, DEFAULT_RAID_SIM_KEY, marchRaid) then
+    if marchRaid and HasPromptableRaidAssignments(DEFAULT_RAID_SIM_KEY, marchRaid) then
         return DEFAULT_RAID_SIM_KEY
     end
 
     local Catalog = LoadoutLocker.RaidCatalog
     for _, raid in ipairs(Catalog.CURRENT_TIER) do
-        if HasPromptableRaidAssignments(specID, raid.key, raid) then
+        if HasPromptableRaidAssignments(raid.key, raid) then
             return raid.key
         end
     end
@@ -291,6 +285,10 @@ end
 
 function RaidUI.Evaluate(options)
     options = options or {}
+    if promptFrame and promptFrame.isLoading then
+        return
+    end
+
     local usingSimulation = RaidUI.IsSimulatingRaid()
     local instanceInfo = Instance.GetCurrent()
     local raidKey, raid
@@ -326,16 +324,10 @@ function RaidUI.Evaluate(options)
 
     lastRaidKey = raidKey
 
-    local specID = Loadout.GetSpecID()
-    if not specID then
-        return
-    end
-
     local killStates = usingSimulation
         and BuildSimulatedKillStates(raid)
         or Raids.GetBossKillStates(raid, instanceInfo)
     local choices = BuildGroupedPromptChoices(
-        specID,
         raidKey,
         raid,
         GetPromptBosses(raid, killStates)
@@ -350,27 +342,21 @@ function RaidUI.Evaluate(options)
 end
 
 function RaidUI.Simulate(requestedRaidKey)
-    local specID = Loadout.GetSpecID()
-    if not specID then
-        Print("Select a specialization first.")
-        return
-    end
-
     if requestedRaidKey == "stop" or requestedRaidKey == "off" then
         RaidUI.SetSimulatedRaid(nil)
         Print("Raid simulation stopped.")
         return
     end
 
-    local raidKey = FindRaidKeyForSimulation(specID, requestedRaidKey)
+    local raidKey = FindRaidKeyForSimulation(requestedRaidKey)
     local raid = Raids.GetByKey(raidKey)
     if not raid then
         Print("No raid data available to simulate.")
         return
     end
 
-    if not HasPromptableRaidAssignments(specID, raidKey, raid) then
-        Print("Assign a raid loadout in /locker that differs from your current talents first.")
+    if not HasPromptableRaidAssignments(raidKey, raid) then
+        Print("Assign a raid loadout in /locker that differs from your current build first.")
         return
     end
 
@@ -396,42 +382,34 @@ function RaidUI.AppendDebugLines(lines, instanceInfo, specID)
     lines[#lines + 1] = "resolvedKey: " .. tostring(raidKey)
     lines[#lines + 1] = "resolvedName: " .. tostring(raid and raid.name)
     lines[#lines + 1] = "promptsEnabled: " .. tostring(DB:AreRaidPromptsEnabled())
-    local defaultConfigID = specID and DB:GetRaidDefaultConfigID(specID)
-    lines[#lines + 1] = "defaultConfigID: " .. tostring(defaultConfigID)
-        .. " (" .. tostring(defaultConfigID and Loadout.GetLoadoutName(defaultConfigID)) .. ")"
+    local defaultRef = DB:GetRaidDefaultLoadoutRef()
+    lines[#lines + 1] = "defaultLoadout: "
+        .. tostring(defaultRef and Loadout.FormatLoadoutLabel(defaultRef.specID, Loadout.GetLoadoutName(defaultRef.configID)))
     lines[#lines + 1] = "dismissedRaidKey: " .. tostring(dismissedRaidKey)
 
-    if not raidKey or not raid or not specID then
+    if not raidKey or not raid then
         return
     end
 
     local killStates = Raids.GetBossKillStates(raid, instanceInfo)
     local bosses = GetPromptBosses(raid, killStates)
-    local choices = BuildGroupedPromptChoices(specID, raidKey, raid, bosses)
+    local choices = BuildGroupedPromptChoices(raidKey, raid, bosses)
 
     lines[#lines + 1] = "promptBosses: " .. tostring(#bosses)
     lines[#lines + 1] = "choices: " .. tostring(choices and #choices or 0)
 
     if choices then
         for index, choice in ipairs(choices) do
-            lines[#lines + 1] = "  choice " .. index .. ": " .. tostring(choice.configID)
-                .. " (" .. tostring(Loadout.GetLoadoutName(choice.configID)) .. ")"
+            lines[#lines + 1] = "  choice " .. index .. ": "
+                .. tostring(Loadout.FormatLoadoutLabel(choice.specID, Loadout.GetLoadoutName(choice.configID)))
         end
     end
 
     lines[#lines + 1] = "boss assignments:"
     for _, boss in ipairs(bosses) do
-        local configID = DB:GetRaidBossConfigID(specID, raidKey, boss.key)
-        lines[#lines + 1] = "  " .. boss.key .. " -> " .. tostring(configID)
-            .. " (" .. tostring(configID and Loadout.GetLoadoutName(configID)) .. ")"
-    end
-end
-
-local ENTER_EVALUATE_DELAYS = { 0.1, 0.5, 1.0, 2.0 }
-
-local function ScheduleEnterEvaluates()
-    for _, delay in ipairs(ENTER_EVALUATE_DELAYS) do
-        C_Timer.After(delay, RaidUI.Evaluate)
+        local ref = DB:GetRaidBossLoadoutRef(raidKey, boss.key)
+        lines[#lines + 1] = "  " .. boss.key .. " -> "
+            .. tostring(ref and Loadout.FormatLoadoutLabel(ref.specID, Loadout.GetLoadoutName(ref.configID)))
     end
 end
 
@@ -458,7 +436,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
     if event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" or event == "ZONE_CHANGED" then
         if IsInInstance() then
             Raids.RequestLockoutRefresh()
-            ScheduleEnterEvaluates()
+            ScheduleEvaluate(ENTER_EVALUATE_DELAY)
         else
             ScheduleEvaluate(0.5)
         end

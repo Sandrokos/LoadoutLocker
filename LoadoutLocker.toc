@@ -8,11 +8,12 @@
 Libs\libs.xml
 
 Constants.lua
+Core\db.lua
 Core\Text.lua
 Core\Instance.lua
-Core\db.lua
 Core\Items.lua
 Core\Loadout.lua
+UI\PromptUtils.lua
 Core\EquipmentSet.lua
 Core\Gear.lua
 Core\Upgrades.lua
@@ -28,14 +29,13 @@ Delves\Registry.lua
 PvP\Constants.lua
 PvP\Catalog.lua
 PvP\Registry.lua
-UI\PromptUtils.lua
+UI\ContentPromptUI.lua
 UI\MenuWidgets.lua
 UI\MenuShell.lua
 UI\Menu.lua
 UI\DungeonUI.lua
 UI\RaidUI.lua
 UI\BugReportUI.lua
-UI\ContentPromptUI.lua
 UI\DelveUI.lua
 UI\PvPUI.lua
 Main.lua

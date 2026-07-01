@@ -16,29 +16,108 @@ local function SetPromptFlag(key, enabled)
     LoadoutLockerDB[key] = enabled and true or false
 end
 
-local function EnsureAssignmentStore(storeKey, collectionKey, specID)
-    LoadoutLockerDB[storeKey] = LoadoutLockerDB[storeKey] or {}
-    if not specID then
-        return nil
-    end
-
-    local assignments = LoadoutLockerDB[storeKey][specID]
-    if not assignments then
-        assignments = { [collectionKey] = {} }
-        LoadoutLockerDB[storeKey][specID] = assignments
-    elseif not assignments[collectionKey] then
-        assignments[collectionKey] = {}
-    end
-
-    return assignments
-end
-
-local function GetAssignmentStoreIfExists(storeKey, specID)
-    return LoadoutLockerDB[storeKey] and LoadoutLockerDB[storeKey][specID]
-end
-
 local function NormalizeInvSlot(invSlot)
     return LoadoutLocker.Gear.NormalizeInvSlot(invSlot)
+end
+
+local function IsLoadoutRef(value)
+    return type(value) == "table" and value.specID and value.configID
+end
+
+local function NormalizeLoadoutRef(value, fallbackSpecID)
+    if IsLoadoutRef(value) then
+        return {
+            specID = value.specID,
+            configID = value.configID,
+        }
+    end
+
+    if type(value) == "number" and fallbackSpecID then
+        return {
+            specID = fallbackSpecID,
+            configID = value,
+        }
+    end
+
+    if type(value) == "string" then
+        local specID, configID = LoadoutLocker.Loadout.DecodeLoadoutKey(value)
+        if specID and configID then
+            return { specID = specID, configID = configID }
+        end
+    end
+end
+
+local function CopyLoadoutRef(ref)
+    if not ref then
+        return nil
+    end
+    return {
+        specID = ref.specID,
+        configID = ref.configID,
+    }
+end
+
+local function EnsureGlobalAssignmentStore(storeKey, collectionKey)
+    LoadoutLockerDB[storeKey] = LoadoutLockerDB[storeKey] or {}
+    local store = LoadoutLockerDB[storeKey]
+    if type(store.defaultLoadout) == "number" then
+        store.defaultLoadout = nil
+    end
+    if not store[collectionKey] then
+        store[collectionKey] = {}
+    end
+    return store
+end
+
+local function MigrateLegacyAssignmentStore(storeKey, collectionKey, raidBosses)
+    if LoadoutLockerDB[storeKey .. "Migrated"] then
+        return
+    end
+
+    local legacy = LoadoutLockerDB[storeKey]
+    if type(legacy) ~= "table" then
+        LoadoutLockerDB[storeKey .. "Migrated"] = true
+        return
+    end
+
+    local store = EnsureGlobalAssignmentStore(storeKey, collectionKey)
+
+    for specID, assignments in pairs(legacy) do
+        if type(specID) == "number" and type(assignments) == "table" then
+            if assignments.defaultConfigID and not store.defaultLoadout then
+                store.defaultLoadout = NormalizeLoadoutRef(assignments.defaultConfigID, specID)
+            end
+            if assignments.defaultLoadout and not store.defaultLoadout then
+                store.defaultLoadout = CopyLoadoutRef(NormalizeLoadoutRef(assignments.defaultLoadout, specID))
+            end
+
+            local collection = assignments[collectionKey]
+            if type(collection) == "table" then
+                for key, value in pairs(collection) do
+                    if not store[collectionKey][key] then
+                        store[collectionKey][key] = CopyLoadoutRef(NormalizeLoadoutRef(value, specID))
+                    end
+                end
+            end
+
+            if raidBosses and type(assignments.raids) == "table" then
+                store.raids = store.raids or {}
+                for raidKey, raidAssignment in pairs(assignments.raids) do
+                    store.raids[raidKey] = store.raids[raidKey] or { bosses = {} }
+                    local bosses = raidAssignment and raidAssignment.bosses
+                    if type(bosses) == "table" then
+                        for bossKey, value in pairs(bosses) do
+                            if not store.raids[raidKey].bosses[bossKey] then
+                                store.raids[raidKey].bosses[bossKey] = CopyLoadoutRef(NormalizeLoadoutRef(value, specID))
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    LoadoutLockerDB[storeKey .. "Migrated"] = true
 end
 
 local function InvalidateTertiaryPriorityCache()
@@ -82,81 +161,162 @@ local function NormalizeGearEntry(entry)
     return { itemID = itemID }
 end
 
-function DB:Initialize()
-    LoadoutLockerDB = LoadoutLockerDB or {}
-    LoadoutLockerDB.dungeonAssignments = LoadoutLockerDB.dungeonAssignments or {}
-    LoadoutLockerDB.raidAssignments = LoadoutLockerDB.raidAssignments or {}
-    LoadoutLockerDB.delveAssignments = LoadoutLockerDB.delveAssignments or {}
-    LoadoutLockerDB.pvpAssignments = LoadoutLockerDB.pvpAssignments or {}
-    self:GetTertiaryPriority()
-end
-
-function DB:AreDungeonPromptsEnabled()
-    return GetPromptFlag("dungeonPromptsEnabled")
-end
-
-function DB:SetDungeonPromptsEnabled(enabled)
-    SetPromptFlag("dungeonPromptsEnabled", enabled)
-end
-
-function DB:GetDungeonAssignments(specID)
-    return EnsureAssignmentStore("dungeonAssignments", "dungeons", specID)
-end
-
-function DB:GetDungeonAssignmentsIfExists(specID)
-    return GetAssignmentStoreIfExists("dungeonAssignments", specID)
-end
-
-function DB:GetDungeonDefaultConfigID(specID)
-    local assignments = GetAssignmentStoreIfExists("dungeonAssignments", specID)
-    return assignments and assignments.defaultConfigID
-end
-
-function DB:SetDungeonDefaultConfigID(specID, configID)
-    local assignments = self:GetDungeonAssignments(specID)
-    if not assignments then
-        return false
+local function InvalidateLoadoutListCache()
+    local Loadout = LoadoutLocker.Loadout
+    if Loadout and Loadout.InvalidateListCache then
+        Loadout.InvalidateListCache()
     end
+end
 
-    assignments.defaultConfigID = configID
+local function SetDefaultLoadoutRef(storeKey, collectionKey, specID, configID)
+    local store = EnsureGlobalAssignmentStore(storeKey, collectionKey)
+    if specID and configID then
+        store.defaultLoadout = { specID = specID, configID = configID }
+    else
+        store.defaultLoadout = nil
+    end
     return true
 end
 
-function DB:GetDungeonConfigID(specID, dungeonKey)
-    local assignments = GetAssignmentStoreIfExists("dungeonAssignments", specID)
-    if not assignments then
+local function SetDefaultFromDropdownValue(storeKey, collectionKey, value, fallbackSpecID)
+    if value == "" or value == nil then
+        return SetDefaultLoadoutRef(storeKey, collectionKey, nil, nil)
+    end
+
+    local specID, configID = LoadoutLocker.Loadout.ParseAssignmentValue(value, fallbackSpecID)
+    return SetDefaultLoadoutRef(storeKey, collectionKey, specID, configID)
+end
+
+local function GetContentLoadoutRef(storeKey, collectionKey, itemKey)
+    local store = LoadoutLockerDB[storeKey]
+    if not store or not itemKey then
         return nil
     end
 
-    local override = assignments.dungeons and assignments.dungeons[dungeonKey]
+    local override = store[collectionKey] and store[collectionKey][itemKey]
     if override then
-        return override
+        return NormalizeLoadoutRef(override)
     end
 
-    return assignments.defaultConfigID
+    return store and NormalizeLoadoutRef(store.defaultLoadout)
 end
 
-function DB:SetDungeonConfigID(specID, dungeonKey, configID)
-    local assignments = self:GetDungeonAssignments(specID)
-    if not assignments or not dungeonKey then
+local function SetContentLoadoutRef(storeKey, collectionKey, itemKey, specID, configID, expandKeys)
+    local store = EnsureGlobalAssignmentStore(storeKey, collectionKey)
+    if not store or not itemKey then
         return false
     end
 
-    local Dungeons = LoadoutLocker.Dungeons
-    for _, key in ipairs(Dungeons.GetLinkedAssignmentKeys(dungeonKey)) do
-        if configID then
-            assignments.dungeons[key] = configID
+    local keys = expandKeys and expandKeys(itemKey) or { itemKey }
+    for _, key in ipairs(keys) do
+        if specID and configID then
+            store[collectionKey][key] = { specID = specID, configID = configID }
         else
-            assignments.dungeons[key] = nil
+            store[collectionKey][key] = nil
         end
     end
 
     return true
 end
 
-function DB:ClearDungeonConfigID(specID, dungeonKey)
-    return self:SetDungeonConfigID(specID, dungeonKey, nil)
+local function SetContentFromDropdownValue(storeKey, collectionKey, itemKey, value, fallbackSpecID, expandKeys)
+    if value == "default" then
+        return SetContentLoadoutRef(storeKey, collectionKey, itemKey, nil, nil, expandKeys)
+    end
+
+    local specID, configID = LoadoutLocker.Loadout.ParseAssignmentValue(value, fallbackSpecID)
+    return SetContentLoadoutRef(storeKey, collectionKey, itemKey, specID, configID, expandKeys)
 end
+
+local function DefineContentAssignments(def)
+    local storeKey = def.storeKey
+    local collectionKey = def.collectionKey
+    local promptFlag = def.promptFlag
+    local prefix = def.prefix
+    local expandKeys = def.expandKeys
+
+    DB["Are" .. prefix .. "PromptsEnabled"] = function()
+        return GetPromptFlag(promptFlag)
+    end
+
+    DB["Set" .. prefix .. "PromptsEnabled"] = function(_, enabled)
+        SetPromptFlag(promptFlag, enabled)
+    end
+
+    DB["Get" .. prefix .. "Assignments"] = function()
+        return EnsureGlobalAssignmentStore(storeKey, collectionKey)
+    end
+
+    DB["Get" .. prefix .. "AssignmentsIfExists"] = function()
+        return LoadoutLockerDB[storeKey]
+    end
+
+    DB["Get" .. prefix .. "DefaultLoadoutRef"] = function()
+        local store = LoadoutLockerDB[storeKey]
+        return store and NormalizeLoadoutRef(store.defaultLoadout)
+    end
+
+    DB["Set" .. prefix .. "DefaultLoadoutRef"] = function(_, specID, configID)
+        return SetDefaultLoadoutRef(storeKey, collectionKey, specID, configID)
+    end
+
+    DB["Set" .. prefix .. "DefaultConfigID"] = function(_, _specID, value)
+        return SetDefaultFromDropdownValue(storeKey, collectionKey, value, _specID)
+    end
+
+    DB["Get" .. prefix .. "LoadoutRef"] = function(_, itemKey)
+        return GetContentLoadoutRef(storeKey, collectionKey, itemKey)
+    end
+
+    DB["Set" .. prefix .. "LoadoutRef"] = function(_, itemKey, specID, configID)
+        return SetContentLoadoutRef(storeKey, collectionKey, itemKey, specID, configID, expandKeys)
+    end
+
+    DB["Set" .. prefix .. "ConfigID"] = function(_, _specID, itemKey, value)
+        return SetContentFromDropdownValue(storeKey, collectionKey, itemKey, value, _specID, expandKeys)
+    end
+
+    DB["Clear" .. prefix .. "ConfigID"] = function(_, _specID, itemKey)
+        return SetContentLoadoutRef(storeKey, collectionKey, itemKey, nil, nil, expandKeys)
+    end
+end
+
+function DB:Initialize()
+    LoadoutLockerDB = LoadoutLockerDB or {}
+    LoadoutLockerDB.dungeonAssignments = LoadoutLockerDB.dungeonAssignments or {}
+    LoadoutLockerDB.raidAssignments = LoadoutLockerDB.raidAssignments or {}
+    LoadoutLockerDB.delveAssignments = LoadoutLockerDB.delveAssignments or {}
+    LoadoutLockerDB.pvpAssignments = LoadoutLockerDB.pvpAssignments or {}
+    MigrateLegacyAssignmentStore("dungeonAssignments", "dungeons", false)
+    MigrateLegacyAssignmentStore("raidAssignments", "raids", true)
+    MigrateLegacyAssignmentStore("delveAssignments", "delves", false)
+    MigrateLegacyAssignmentStore("pvpAssignments", "modes", false)
+    self:GetTertiaryPriority()
+end
+
+DefineContentAssignments({
+    prefix = "Dungeon",
+    storeKey = "dungeonAssignments",
+    collectionKey = "dungeons",
+    promptFlag = "dungeonPromptsEnabled",
+    expandKeys = function(dungeonKey)
+        return LoadoutLocker.Dungeons.GetLinkedAssignmentKeys(dungeonKey)
+    end,
+})
+
+DefineContentAssignments({
+    prefix = "Delve",
+    storeKey = "delveAssignments",
+    collectionKey = "delves",
+    promptFlag = "delvePromptsEnabled",
+})
+
+DefineContentAssignments({
+    prefix = "PvP",
+    storeKey = "pvpAssignments",
+    collectionKey = "modes",
+    promptFlag = "pvpPromptsEnabled",
+})
 
 function DB:AreRaidPromptsEnabled()
     return GetPromptFlag("raidPromptsEnabled")
@@ -166,25 +326,26 @@ function DB:SetRaidPromptsEnabled(enabled)
     SetPromptFlag("raidPromptsEnabled", enabled)
 end
 
-function DB:GetRaidAssignments(specID)
-    return EnsureAssignmentStore("raidAssignments", "raids", specID)
+function DB:GetRaidAssignments(_specID)
+    return EnsureGlobalAssignmentStore("raidAssignments", "raids")
 end
 
-function DB:GetRaidAssignmentIfExists(specID, raidKey)
-    local assignments = GetAssignmentStoreIfExists("raidAssignments", specID)
-    return assignments and assignments.raids[raidKey]
+function DB:GetRaidAssignmentIfExists(_specID, raidKey)
+    local store = LoadoutLockerDB.raidAssignments
+    return store and store.raids and store.raids[raidKey]
 end
 
-function DB:GetRaidAssignment(specID, raidKey)
-    local assignments = self:GetRaidAssignments(specID)
-    if not assignments then
+function DB:GetRaidAssignment(_specID, raidKey)
+    local store = self:GetRaidAssignments()
+    if not store or not raidKey then
         return nil
     end
 
-    local raidAssignment = assignments.raids[raidKey]
+    store.raids = store.raids or {}
+    local raidAssignment = store.raids[raidKey]
     if not raidAssignment then
         raidAssignment = { bosses = {} }
-        assignments.raids[raidKey] = raidAssignment
+        store.raids[raidKey] = raidAssignment
     elseif not raidAssignment.bosses then
         raidAssignment.bosses = {}
     end
@@ -192,165 +353,63 @@ function DB:GetRaidAssignment(specID, raidKey)
     return raidAssignment
 end
 
-function DB:GetRaidDefaultConfigID(specID)
-    local assignments = GetAssignmentStoreIfExists("raidAssignments", specID)
-    return assignments and assignments.defaultConfigID
+function DB:GetRaidDefaultLoadoutRef()
+    local store = LoadoutLockerDB.raidAssignments
+    return store and NormalizeLoadoutRef(store.defaultLoadout)
 end
 
-function DB:SetRaidDefaultConfigID(specID, configID)
-    local assignments = self:GetRaidAssignments(specID)
-    if not assignments then
-        return false
-    end
-
-    assignments.defaultConfigID = configID
-    return true
+function DB:SetRaidDefaultLoadoutRef(specID, configID)
+    return SetDefaultLoadoutRef("raidAssignments", "raids", specID, configID)
 end
 
-function DB:GetRaidBossConfigID(specID, raidKey, bossKey)
-    local assignments = GetAssignmentStoreIfExists("raidAssignments", specID)
-    if not assignments then
+function DB:SetRaidDefaultConfigID(_specID, value)
+    return SetDefaultFromDropdownValue("raidAssignments", "raids", value, _specID)
+end
+
+function DB:GetRaidBossLoadoutRef(raidKey, bossKey)
+    local store = LoadoutLockerDB.raidAssignments
+    if not store or not raidKey or not bossKey then
         return nil
     end
 
-    local raidAssignment = assignments.raids and assignments.raids[raidKey]
-    if raidAssignment and raidAssignment.bosses and raidAssignment.bosses[bossKey] then
-        return raidAssignment.bosses[bossKey]
+    local raidAssignment = store.raids and store.raids[raidKey]
+    local override = raidAssignment and raidAssignment.bosses and raidAssignment.bosses[bossKey]
+    if override then
+        return NormalizeLoadoutRef(override)
     end
 
-    return assignments.defaultConfigID
+    return self:GetRaidDefaultLoadoutRef()
 end
 
-function DB:SetRaidBossConfigID(specID, raidKey, bossKey, configID)
+function DB:SetRaidBossLoadoutRef(raidKey, bossKey, specID, configID)
     if not bossKey then
         return false
     end
 
-    local raidAssignment = self:GetRaidAssignment(specID, raidKey)
+    local raidAssignment = self:GetRaidAssignment(nil, raidKey)
     if not raidAssignment then
         return false
     end
 
-    raidAssignment.bosses[bossKey] = configID
+    if specID and configID then
+        raidAssignment.bosses[bossKey] = { specID = specID, configID = configID }
+    else
+        raidAssignment.bosses[bossKey] = nil
+    end
     return true
 end
 
-function DB:ClearRaidBossConfigID(specID, raidKey, bossKey)
-    return self:SetRaidBossConfigID(specID, raidKey, bossKey, nil)
-end
-
-function DB:AreDelvePromptsEnabled()
-    return GetPromptFlag("delvePromptsEnabled")
-end
-
-function DB:SetDelvePromptsEnabled(enabled)
-    SetPromptFlag("delvePromptsEnabled", enabled)
-end
-
-function DB:GetDelveAssignments(specID)
-    return EnsureAssignmentStore("delveAssignments", "delves", specID)
-end
-
-function DB:GetDelveAssignmentsIfExists(specID)
-    return GetAssignmentStoreIfExists("delveAssignments", specID)
-end
-
-function DB:GetDelveDefaultConfigID(specID)
-    local assignments = GetAssignmentStoreIfExists("delveAssignments", specID)
-    return assignments and assignments.defaultConfigID
-end
-
-function DB:SetDelveDefaultConfigID(specID, configID)
-    local assignments = self:GetDelveAssignments(specID)
-    if not assignments then
-        return false
+function DB:SetRaidBossConfigID(_specID, raidKey, bossKey, value)
+    if value == "default" then
+        return self:ClearRaidBossConfigID(nil, raidKey, bossKey)
     end
 
-    assignments.defaultConfigID = configID
-    return true
+    local specID, configID = LoadoutLocker.Loadout.ParseAssignmentValue(value, _specID)
+    return self:SetRaidBossLoadoutRef(raidKey, bossKey, specID, configID)
 end
 
-function DB:GetDelveConfigID(specID, delveKey)
-    local assignments = GetAssignmentStoreIfExists("delveAssignments", specID)
-    if not assignments then
-        return nil
-    end
-
-    local override = assignments.delves and assignments.delves[delveKey]
-    if override then
-        return override
-    end
-
-    return assignments.defaultConfigID
-end
-
-function DB:SetDelveConfigID(specID, delveKey, configID)
-    local assignments = self:GetDelveAssignments(specID)
-    if not assignments or not delveKey then
-        return false
-    end
-
-    assignments.delves[delveKey] = configID
-    return true
-end
-
-function DB:ClearDelveConfigID(specID, delveKey)
-    return self:SetDelveConfigID(specID, delveKey, nil)
-end
-
-function DB:ArePvPPromptsEnabled()
-    return GetPromptFlag("pvpPromptsEnabled")
-end
-
-function DB:SetPvPPromptsEnabled(enabled)
-    SetPromptFlag("pvpPromptsEnabled", enabled)
-end
-
-function DB:GetPvPAssignments(specID)
-    return EnsureAssignmentStore("pvpAssignments", "modes", specID)
-end
-
-function DB:GetPvPDefaultConfigID(specID)
-    local assignments = GetAssignmentStoreIfExists("pvpAssignments", specID)
-    return assignments and assignments.defaultConfigID
-end
-
-function DB:SetPvPDefaultConfigID(specID, configID)
-    local assignments = self:GetPvPAssignments(specID)
-    if not assignments then
-        return false
-    end
-
-    assignments.defaultConfigID = configID
-    return true
-end
-
-function DB:GetPvPConfigID(specID, modeKey)
-    local assignments = GetAssignmentStoreIfExists("pvpAssignments", specID)
-    if not assignments then
-        return nil
-    end
-
-    local override = assignments.modes and assignments.modes[modeKey]
-    if override then
-        return override
-    end
-
-    return assignments.defaultConfigID
-end
-
-function DB:SetPvPConfigID(specID, modeKey, configID)
-    local assignments = self:GetPvPAssignments(specID)
-    if not assignments or not modeKey then
-        return false
-    end
-
-    assignments.modes[modeKey] = configID
-    return true
-end
-
-function DB:ClearPvPConfigID(specID, modeKey)
-    return self:SetPvPConfigID(specID, modeKey, nil)
+function DB:ClearRaidBossConfigID(_specID, raidKey, bossKey)
+    return self:SetRaidBossLoadoutRef(raidKey, bossKey, nil, nil)
 end
 
 function DB:AreUpgradeChecksEnabled()
@@ -505,23 +564,23 @@ function DB:ClearAllIgnoredUpgradeSlots(specID, configID)
     return true
 end
 
-function DB:GetSavedGearSetList(specID)
-    local specData = self:GetSpecEntries(specID)
-    if not specData then
-        return {}
-    end
-
+function DB:GetAllSavedGearEntries()
     local list = {}
-    for configID, entry in pairs(specData) do
-        if entry.gear then
-            list[#list + 1] = {
-                configID = configID,
-                name = LoadoutLocker.Loadout.ResolveLoadoutName(configID, entry.loadoutName),
-            }
+
+    for specID, specData in pairs(LoadoutLockerDB) do
+        if type(specID) == "number" and type(specData) == "table" then
+            for configID, entry in pairs(specData) do
+                if type(configID) == "number" and type(entry) == "table" and entry.gear then
+                    list[#list + 1] = {
+                        specID = specID,
+                        configID = configID,
+                        name = LoadoutLocker.Loadout.ResolveLoadoutName(configID, entry.loadoutName),
+                        equipmentSetName = entry.equipmentSetName,
+                    }
+                end
+            end
         end
     end
-
-    LoadoutLocker.Loadout.SortByName(list)
 
     return list
 end
@@ -565,6 +624,7 @@ function DB:CreateOrUpdateGearSet(specID, configID, gear, loadoutName)
         ignoredUpgradeSlots = existing and existing.ignoredUpgradeSlots,
         equipmentSetName = existing and existing.equipmentSetName,
     }
+    InvalidateLoadoutListCache()
 end
 
 function DB:CopyIgnoredUpgradeSlots(ignored)
@@ -580,14 +640,14 @@ function DB:CopyIgnoredUpgradeSlots(ignored)
     return copy
 end
 
-function DB:CopyGearSetToLoadout(specID, sourceConfigID, targetConfigID, targetLoadoutName)
-    local gear = self:GetGearSet(specID, sourceConfigID)
+function DB:CopyGearSetToLoadout(specID, sourceConfigID, targetConfigID, targetLoadoutName, sourceSpecID)
+    local gear = self:GetGearSet(sourceSpecID or specID, sourceConfigID)
     if not gear then
         return false
     end
 
     local specData = self:EnsureSpecTable(specID)
-    local sourceEntry = self:GetEntry(specID, sourceConfigID)
+    local sourceEntry = self:GetEntry(sourceSpecID or specID, sourceConfigID)
     specData[targetConfigID] = {
         gear = self:CopyGearSet(gear),
         loadoutName = targetLoadoutName,
@@ -595,6 +655,7 @@ function DB:CopyGearSetToLoadout(specID, sourceConfigID, targetConfigID, targetL
         ignoredUpgradeSlots = sourceEntry and self:CopyIgnoredUpgradeSlots(sourceEntry.ignoredUpgradeSlots),
         equipmentSetName = sourceEntry and sourceEntry.equipmentSetName,
     }
+    InvalidateLoadoutListCache()
     return true
 end
 
@@ -606,6 +667,7 @@ function DB:DeleteGearSet(specID, configID)
     end
 
     specData[configID] = nil
+    InvalidateLoadoutListCache()
     return entry
 end
 

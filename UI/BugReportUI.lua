@@ -4,7 +4,6 @@ local BugReportUI = {}
 LoadoutLocker.BugReportUI = BugReportUI
 
 local C = LoadoutLocker.Constants
-local DB = LoadoutLocker.DB
 local Dungeons = LoadoutLocker.Dungeons
 local Delves = LoadoutLocker.Delves
 local PvP = LoadoutLocker.PvP
@@ -12,6 +11,7 @@ local Instance = LoadoutLocker.Instance
 local Loadout = LoadoutLocker.Loadout
 local Widgets = LoadoutLocker.MenuWidgets
 local Style = Widgets.Style
+local DB = LoadoutLocker.DB
 
 local GITHUB_ISSUES_URL = "https://github.com/Sandrokos/LoadoutLocker/issues"
 local MAX_CAPTURED_ERRORS = 1
@@ -21,6 +21,7 @@ local DEBUG_BOX_INSET = 6
 
 local reportFrame
 local capturedErrors = {}
+local lastScriptErrorText
 local errorHandlerInstalled
 
 local function GetAddonVersion()
@@ -49,16 +50,6 @@ local function UpdateDebugScrollHeight(editBox, scrollFrame)
     scrollFrame:UpdateScrollChildRect()
 end
 
-local function RefreshDebugPanel(frame, text)
-    frame.debugStoredText = text or BugReportUI.BuildDebugText()
-    frame.debugEditBox:SetText(frame.debugStoredText)
-    C_Timer.After(0, function()
-        if frame:IsShown() then
-            UpdateDebugScrollHeight(frame.debugEditBox, frame.debugScroll)
-        end
-    end)
-end
-
 local function AppendZoneLines(lines, instanceInfo)
     local zoneNames = Instance.CollectZoneNames(instanceInfo)
     if #zoneNames > 0 then
@@ -85,39 +76,120 @@ local function AppendLoadoutLine(lines, label, configID)
         .. " (" .. tostring(configID and Loadout.GetLoadoutName(configID)) .. ")"
 end
 
-local function AppendSimpleContentSection(lines, heading, active, resolvedKey, entityName, promptsEnabled, defaultConfigID, assignedConfigID)
+local function AppendLoadoutRefLine(lines, label, ref)
+    if not ref then
+        lines[#lines + 1] = label .. ": nil"
+        return
+    end
+
+    if type(ref) == "table" then
+        lines[#lines + 1] = label .. ": "
+            .. Loadout.FormatLoadoutLabel(ref.specID, Loadout.GetLoadoutName(ref.configID))
+            .. " [" .. tostring(ref.specID) .. ":" .. tostring(ref.configID) .. "]"
+        return
+    end
+
+    lines[#lines + 1] = label .. ": " .. tostring(ref)
+        .. " (" .. tostring(Loadout.GetLoadoutName(ref)) .. ")"
+end
+
+local function AppendSimpleContentSection(lines, heading, active, resolvedKey, entityName, promptsEnabled, defaultRef, assignedRef)
     lines[#lines + 1] = ""
     lines[#lines + 1] = "--- " .. heading .. " ---"
     lines[#lines + 1] = "active: " .. tostring(active)
     lines[#lines + 1] = "resolvedKey: " .. tostring(resolvedKey)
     lines[#lines + 1] = "resolvedName: " .. tostring(entityName)
     lines[#lines + 1] = "promptsEnabled: " .. tostring(promptsEnabled)
-    AppendLoadoutLine(lines, "defaultConfigID", defaultConfigID)
-    AppendLoadoutLine(lines, "assignedConfigID", assignedConfigID)
+    AppendLoadoutRefLine(lines, "defaultLoadout", defaultRef)
+    AppendLoadoutRefLine(lines, "assignedLoadout", assignedRef)
 end
 
 local function GetScriptErrorFrameText()
     local scriptErrors = _G.ScriptErrorsFrame
-    if not scriptErrors or not scriptErrors:IsShown() then
-        return nil
-    end
+    if scriptErrors then
+        local textWidget = scriptErrors.ScrollFrame and scriptErrors.ScrollFrame.Text
+        if textWidget and textWidget.GetText then
+            local text = textWidget:GetText()
+            if text and text ~= "" then
+                return text
+            end
+        end
 
-    local textWidget = scriptErrors.ScrollFrame and scriptErrors.ScrollFrame.Text
-    if textWidget and textWidget.GetText then
-        local text = textWidget:GetText()
-        if text and text ~= "" then
-            return text
+        if scriptErrors.error and scriptErrors.error.GetText then
+            local text = scriptErrors.error:GetText()
+            if text and text ~= "" then
+                return text
+            end
         end
     end
 
-    if scriptErrors.error and scriptErrors.error.GetText then
-        local text = scriptErrors.error:GetText()
-        if text and text ~= "" then
-            return text
-        end
+    return lastScriptErrorText
+end
+
+local function RememberCapturedError(message, trace)
+    capturedErrors[#capturedErrors + 1] = {
+        time = date("%Y-%m-%d %H:%M:%S"),
+        msg = tostring(message),
+        trace = trace or "",
+    }
+    while #capturedErrors > MAX_CAPTURED_ERRORS do
+        table.remove(capturedErrors, 1)
+    end
+end
+
+local function FormatCapturedError(entry)
+    local lines = {
+        string.format("[%s]", entry.time),
+        entry.msg,
+    }
+    if entry.trace and entry.trace ~= "" then
+        lines[#lines + 1] = entry.trace
+    end
+    return table.concat(lines, "\n")
+end
+
+local function GetLastLuaErrorText()
+    local entry = capturedErrors[#capturedErrors]
+    if entry then
+        return FormatCapturedError(entry)
     end
 
-    return nil
+    return GetScriptErrorFrameText()
+end
+
+local function AppendLastLuaError(lines)
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = "--- Last Lua error ---"
+    local errorText = GetLastLuaErrorText()
+    if errorText and errorText ~= "" then
+        lines[#lines + 1] = errorText
+    else
+        lines[#lines + 1] = "(none captured)"
+    end
+end
+
+local function EnsureDebugTextWithError(text)
+    if not text or text == "" then
+        return BugReportUI.BuildDebugText()
+    end
+
+    if text:find("--- Last Lua error ---", 1, true) then
+        return text
+    end
+
+    local lines = { text }
+    AppendLastLuaError(lines)
+    return table.concat(lines, "\n")
+end
+
+local function RefreshDebugPanel(frame, text)
+    frame.debugStoredText = EnsureDebugTextWithError(text)
+    frame.debugEditBox:SetText(frame.debugStoredText)
+    C_Timer.After(0, function()
+        if frame:IsShown() then
+            UpdateDebugScrollHeight(frame.debugEditBox, frame.debugScroll)
+        end
+    end)
 end
 
 function BugReportUI.BuildDebugText()
@@ -146,8 +218,8 @@ function BugReportUI.BuildDebugText()
         dungeonKey,
         dungeon and dungeon.name,
         DB:AreDungeonPromptsEnabled(),
-        specID and DB:GetDungeonDefaultConfigID(specID),
-        specID and dungeonKey and DB:GetDungeonConfigID(specID, dungeonKey)
+        DB:GetDungeonDefaultLoadoutRef(),
+        dungeonKey and DB:GetDungeonLoadoutRef(dungeonKey)
     )
 
     local raidUI = LoadoutLocker.RaidUI
@@ -162,8 +234,8 @@ function BugReportUI.BuildDebugText()
         delveKey,
         delve and delve.name,
         DB:AreDelvePromptsEnabled(),
-        specID and DB:GetDelveDefaultConfigID(specID),
-        specID and delveKey and DB:GetDelveConfigID(specID, delveKey)
+        DB:GetDelveDefaultLoadoutRef(),
+        delveKey and DB:GetDelveLoadoutRef(delveKey)
     )
 
     AppendSimpleContentSection(
@@ -173,51 +245,51 @@ function BugReportUI.BuildDebugText()
         pvpKey,
         pvpMode and pvpMode.name,
         DB:ArePvPPromptsEnabled(),
-        specID and DB:GetPvPDefaultConfigID(specID),
-        specID and pvpKey and DB:GetPvPConfigID(specID, pvpKey)
+        DB:GetPvPDefaultLoadoutRef(),
+        pvpKey and DB:GetPvPLoadoutRef(pvpKey)
     )
 
-    local entry = capturedErrors[#capturedErrors]
-    if entry then
-        lines[#lines + 1] = ""
-        lines[#lines + 1] = "--- Most recent Lua error ---"
-        lines[#lines + 1] = string.format("[%s]", entry.time)
-        lines[#lines + 1] = entry.msg
-        if entry.trace and entry.trace ~= "" then
-            lines[#lines + 1] = entry.trace
-        end
-    else
-        local frameText = GetScriptErrorFrameText()
-        if frameText then
-            lines[#lines + 1] = ""
-            lines[#lines + 1] = "--- Most recent Lua error (Blizzard error frame) ---"
-            lines[#lines + 1] = frameText
-        end
-    end
+    AppendLastLuaError(lines)
 
     return table.concat(lines, "\n")
 end
 
+local function HookScriptErrorsFrame()
+    local frame = _G.ScriptErrorsFrame
+    if not frame or frame.LoadoutLockerErrorHooked then
+        return
+    end
+
+    frame.LoadoutLockerErrorHooked = true
+
+    if frame.Display then
+        hooksecurefunc(frame, "Display", function(_, message)
+            if not message or message == "" then
+                return
+            end
+
+            lastScriptErrorText = tostring(message)
+            RememberCapturedError(message, debugstack and debugstack(2) or "")
+        end)
+    end
+end
+
 function BugReportUI.InstallErrorCapture()
+    HookScriptErrorsFrame()
+
     if errorHandlerInstalled then
         return
     end
-    errorHandlerInstalled = true
 
     local originalHandler = geterrorhandler and geterrorhandler()
     if not originalHandler then
         return
     end
 
+    errorHandlerInstalled = true
+
     seterrorhandler(function(message)
-        capturedErrors[#capturedErrors + 1] = {
-            time = date("%Y-%m-%d %H:%M:%S"),
-            msg = tostring(message),
-            trace = debugstack(2),
-        }
-        while #capturedErrors > MAX_CAPTURED_ERRORS do
-            table.remove(capturedErrors, 1)
-        end
+        RememberCapturedError(message, debugstack(2))
         return originalHandler(message)
     end)
 end

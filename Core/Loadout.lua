@@ -7,6 +7,7 @@ local DB = LoadoutLocker.DB
 
 local activeLoadoutBySpec = {}
 local pendingLoadoutSwitch
+local awaitingTalentSwitchAfterSpec
 local loadoutSelectionHooked
 local lastAppliedSpecID
 local lastUpgradeCheckBySpec = {}
@@ -16,6 +17,373 @@ function Loadout.GetSpecID()
     if specIndex then
         return (C_SpecializationInfo.GetSpecializationInfo(specIndex))
     end
+end
+
+function Loadout.GetSpecName(specID)
+    if not specID then
+        return nil
+    end
+
+    if GetSpecializationInfoForSpecID then
+        local _, name = GetSpecializationInfoForSpecID(specID)
+        if name and name ~= "" then
+            return name
+        end
+    end
+
+    for _, spec in ipairs(Loadout.GetClassSpecList()) do
+        if spec.specID == specID then
+            return spec.name
+        end
+    end
+end
+
+function Loadout.GetPlayerClassID()
+    local _, _, classID = UnitClass("player")
+    return classID
+end
+
+local function AddUniqueSpecID(seen, specIDs, specID)
+    if not specID or seen[specID] then
+        return
+    end
+
+    seen[specID] = true
+    specIDs[#specIDs + 1] = specID
+end
+
+local function GetPlayerSpecIDAtIndex(specIndex)
+    if not specIndex or not C_SpecializationInfo.GetSpecializationInfo then
+        return nil
+    end
+
+    local classID = Loadout.GetPlayerClassID()
+    if classID then
+        local specID = select(1, C_SpecializationInfo.GetSpecializationInfo(specIndex, false, false, nil, nil, nil, classID))
+        specID = tonumber(specID)
+        if specID and specID > 0 then
+            return specID
+        end
+    end
+
+    return tonumber(select(1, C_SpecializationInfo.GetSpecializationInfo(specIndex)))
+end
+
+local function IsInitialSpecName(name)
+    return name == "Initial" or name == "Initial Spec"
+end
+
+local function ShouldIncludeClassSpecID(specID, name, isAllowed)
+    if not specID or specID <= 0 or isAllowed == false then
+        return false
+    end
+    return not IsInitialSpecName(name)
+end
+
+local function GetPlayerSpecSlotCount()
+    local numPlayerSpecs = C_SpecializationInfo.GetNumSpecializations and C_SpecializationInfo.GetNumSpecializations() or 0
+    local classID = Loadout.GetPlayerClassID()
+    local numClassSpecs = 0
+    if classID and C_SpecializationInfo.GetNumSpecializationsForClassID then
+        numClassSpecs = C_SpecializationInfo.GetNumSpecializationsForClassID(classID) or 0
+    end
+    return math.max(numPlayerSpecs, numClassSpecs)
+end
+
+local function ForEachPlayerSpec(callback)
+    for specIndex = 1, GetPlayerSpecSlotCount() do
+        local specID = GetPlayerSpecIDAtIndex(specIndex)
+        if specID and callback(specIndex, specID) then
+            return
+        end
+    end
+end
+
+local function ForEachClassSpec(callback)
+    local classID = Loadout.GetPlayerClassID()
+    if not classID or not C_SpecializationInfo.GetSpecializationInfoForClassID then
+        return
+    end
+
+    local numSpecs = C_SpecializationInfo.GetNumSpecializationsForClassID
+        and C_SpecializationInfo.GetNumSpecializationsForClassID(classID)
+        or 0
+    for specIndex = 1, numSpecs do
+        local specID, name, _, _, _, _, _, isAllowed = C_SpecializationInfo.GetSpecializationInfoForClassID(classID, specIndex)
+        specID = tonumber(specID)
+        if ShouldIncludeClassSpecID(specID, name, isAllowed) and callback(specIndex, specID, name) then
+            return
+        end
+    end
+end
+
+local function CollectSpecIDsFromClassAPI(seen, specIDs)
+    ForEachClassSpec(function(_, specID)
+        AddUniqueSpecID(seen, specIDs, specID)
+    end)
+
+    ForEachPlayerSpec(function(_, specID)
+        AddUniqueSpecID(seen, specIDs, specID)
+    end)
+end
+
+local function CollectSpecIDsFromSavedData(seen, specIDs)
+    for specID, specData in pairs(LoadoutLockerDB) do
+        if type(specID) == "number" and type(specData) == "table" then
+            AddUniqueSpecID(seen, specIDs, specID)
+        end
+    end
+end
+
+function Loadout.CollectKnownSpecIDs()
+    local seen = {}
+    local specIDs = {}
+
+    CollectSpecIDsFromClassAPI(seen, specIDs)
+    AddUniqueSpecID(seen, specIDs, Loadout.GetSpecID())
+    CollectSpecIDsFromSavedData(seen, specIDs)
+
+    table.sort(specIDs)
+    return specIDs
+end
+
+function Loadout.GetClassSpecList()
+    local specs = {}
+
+    for _, specID in ipairs(Loadout.CollectKnownSpecIDs()) do
+        specs[#specs + 1] = {
+            specIndex = Loadout.GetSpecIndex(specID),
+            specID = specID,
+            name = Loadout.GetSpecName(specID) or ("Spec " .. tostring(specID)),
+        }
+    end
+
+    return specs
+end
+
+function Loadout.IsKnownSpecID(specID)
+    specID = tonumber(specID)
+    if not specID then
+        return false
+    end
+
+    for _, knownSpecID in ipairs(Loadout.CollectKnownSpecIDs()) do
+        if knownSpecID == specID then
+            return true
+        end
+    end
+
+    local api = C_SpecializationInfo.GetSpecializationInfoForSpecID or GetSpecializationInfoForSpecID
+    if api then
+        return tonumber(select(1, api(specID))) == specID
+    end
+
+    return false
+end
+
+function Loadout.GetSpecIndex(specID)
+    specID = tonumber(specID)
+    if not specID then
+        return nil
+    end
+
+    local foundIndex
+    ForEachPlayerSpec(function(specIndex, playerSpecID)
+        if playerSpecID == specID then
+            foundIndex = specIndex
+            return true
+        end
+    end)
+
+    return foundIndex
+end
+
+function Loadout.EncodeLoadoutKey(specID, configID)
+    if not specID or not configID then
+        return ""
+    end
+    return tostring(specID) .. ":" .. tostring(configID)
+end
+
+function Loadout.DecodeLoadoutKey(key)
+    if not key or key == "" or key == "default" then
+        return nil, nil
+    end
+
+    local specID, configID = tostring(key):match("^(%d+):(%d+)$")
+    return tonumber(specID), tonumber(configID)
+end
+
+function Loadout.ParseAssignmentValue(value, fallbackSpecID)
+    local specID, configID = Loadout.DecodeLoadoutKey(value)
+    if not specID then
+        configID = tonumber(value)
+        specID = fallbackSpecID
+    end
+    return specID, configID
+end
+
+local function SortLoadoutListBySpecAndName(list)
+    table.sort(list, function(a, b)
+        if a.specName == b.specName then
+            return a.name < b.name
+        end
+        return a.specName < b.specName
+    end)
+end
+
+function Loadout.FormatLoadoutLabel(specID, loadoutName)
+    local specName = Loadout.GetSpecName(specID) or "Spec"
+    local name = loadoutName or "Loadout"
+    return specName .. "-" .. name
+end
+
+local cachedAllConfigList
+local cachedAllSavedLoadoutList
+local cachedSavedGearKeys
+
+function Loadout.InvalidateListCache()
+    cachedAllConfigList = nil
+    cachedAllSavedLoadoutList = nil
+    cachedSavedGearKeys = nil
+end
+
+local function GetSavedGearKeys()
+    if cachedSavedGearKeys then
+        return cachedSavedGearKeys
+    end
+
+    local keys = {}
+    for _, entry in ipairs(DB:GetAllSavedGearEntries()) do
+        keys[Loadout.EncodeLoadoutKey(entry.specID, entry.configID)] = true
+    end
+
+    cachedSavedGearKeys = keys
+    return keys
+end
+
+function Loadout.GetAllConfigList()
+    if cachedAllConfigList then
+        return cachedAllConfigList
+    end
+
+    local list = {}
+    local savedKeys = GetSavedGearKeys()
+
+    for _, spec in ipairs(Loadout.GetClassSpecList()) do
+        for _, entry in ipairs(Loadout.GetConfigList(spec.specID, savedKeys)) do
+            list[#list + 1] = {
+                specID = spec.specID,
+                specName = spec.name,
+                configID = entry.configID,
+                name = entry.name,
+                label = spec.name .. "-" .. entry.name,
+                key = Loadout.EncodeLoadoutKey(spec.specID, entry.configID),
+                hasSavedGear = entry.hasSavedGear,
+            }
+        end
+    end
+
+    SortLoadoutListBySpecAndName(list)
+
+    cachedAllConfigList = list
+    return list
+end
+
+function Loadout.GetAllSavedLoadoutList()
+    if cachedAllSavedLoadoutList then
+        return cachedAllSavedLoadoutList
+    end
+
+    local list = {}
+
+    for _, entry in ipairs(DB:GetAllSavedGearEntries()) do
+        local specName = Loadout.GetSpecName(entry.specID) or ("Spec " .. tostring(entry.specID))
+        list[#list + 1] = {
+            specID = entry.specID,
+            specName = specName,
+            configID = entry.configID,
+            name = entry.name,
+            label = specName .. "-" .. entry.name,
+            key = Loadout.EncodeLoadoutKey(entry.specID, entry.configID),
+            equipmentSetName = entry.equipmentSetName or "",
+            hasSavedGear = true,
+        }
+    end
+
+    SortLoadoutListBySpecAndName(list)
+
+    cachedAllSavedLoadoutList = list
+    return list
+end
+
+function Loadout.IsAssignedLoadoutActive(targetSpecID, targetConfigID)
+    if not targetSpecID or not targetConfigID then
+        return false
+    end
+
+    local currentSpecID = Loadout.GetSpecID()
+    if currentSpecID ~= targetSpecID then
+        return false
+    end
+
+    return Loadout.GetLoadoutConfigID(currentSpecID) == targetConfigID
+end
+
+function Loadout.SwitchToSpec(specID)
+    specID = tonumber(specID)
+    if not specID then
+        return false
+    end
+
+    if Loadout.GetSpecID() == specID then
+        return true
+    end
+
+    if InCombatLockdown and InCombatLockdown() then
+        return false
+    end
+
+    local specIndex = Loadout.GetSpecIndex(specID)
+    if not specIndex or not C_SpecializationInfo.SetSpecialization then
+        return false
+    end
+
+    if C_SpecializationInfo.SetSpecialization(specIndex) then
+        return true
+    end
+
+    return Loadout.GetSpecID() == specID
+end
+
+function Loadout.ApplyAssignedLoadout(targetSpecID, targetConfigID)
+    targetSpecID = tonumber(targetSpecID)
+    targetConfigID = tonumber(targetConfigID)
+    if not targetSpecID or not targetConfigID or Loadout.IsStarterBuild(targetConfigID) then
+        return false, "invalid"
+    end
+
+    if Loadout.IsAssignedLoadoutActive(targetSpecID, targetConfigID) then
+        return true, "unchanged"
+    end
+
+    if InCombatLockdown and InCombatLockdown() then
+        return false, "combat"
+    end
+
+    local currentSpecID = Loadout.GetSpecID()
+    if currentSpecID ~= targetSpecID then
+        awaitingTalentSwitchAfterSpec = { specID = targetSpecID, configID = targetConfigID }
+        pendingLoadoutSwitch = { specID = targetSpecID, configID = targetConfigID }
+        if not Loadout.SwitchToSpec(targetSpecID) then
+            pendingLoadoutSwitch = nil
+            awaitingTalentSwitchAfterSpec = nil
+            return false, "spec"
+        end
+        return true, "spec_changed"
+    end
+
+    return Loadout.SwitchTo(targetConfigID, targetSpecID)
 end
 
 function Loadout.GetLoadoutConfigID(specID)
@@ -100,10 +468,6 @@ function Loadout.QueueSwitch(specID, configID)
         return
     end
 
-    if Loadout.GetSpecID() ~= specID then
-        return
-    end
-
     pendingLoadoutSwitch = { specID = specID, configID = configID }
 end
 
@@ -146,6 +510,18 @@ function Loadout.PeekPendingSwitch()
     return pendingLoadoutSwitch
 end
 
+function Loadout.IsAwaitingTalentSwitchAfterSpec()
+    return awaitingTalentSwitchAfterSpec ~= nil
+end
+
+function Loadout.GetAwaitingTalentSwitchAfterSpec()
+    return awaitingTalentSwitchAfterSpec
+end
+
+function Loadout.ClearAwaitingTalentSwitchAfterSpec()
+    awaitingTalentSwitchAfterSpec = nil
+end
+
 function Loadout.ShouldRunUpgradeCheck(specID, configID)
     if not specID or not configID then
         return false
@@ -186,6 +562,10 @@ function Loadout.HookSelection()
             return
         end
 
+        if Loadout.IsAwaitingTalentSwitchAfterSpec() then
+            return
+        end
+
         pendingLoadoutSwitch = { specID = specID, configID = configID }
 
         local gear = LoadoutLocker.Gear
@@ -205,12 +585,13 @@ function Loadout.RecordCurrent()
     end
 end
 
-function Loadout.GetConfigList(specID)
+function Loadout.GetConfigList(specID, savedKeys)
     specID = specID or Loadout.GetSpecID()
     if not specID or not C_ClassTalents or not C_ClassTalents.GetConfigIDsBySpecID then
         return {}
     end
 
+    savedKeys = savedKeys or GetSavedGearKeys()
     local configIDs = C_ClassTalents.GetConfigIDsBySpecID(specID) or {}
     local list = {}
 
@@ -219,7 +600,7 @@ function Loadout.GetConfigList(specID)
             list[#list + 1] = {
                 configID = configID,
                 name = Loadout.GetLoadoutName(configID),
-                hasSavedGear = DB:HasGearSet(specID, configID),
+                hasSavedGear = savedKeys[Loadout.EncodeLoadoutKey(specID, configID)] == true,
             }
         end
     end

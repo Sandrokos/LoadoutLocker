@@ -17,8 +17,8 @@ local PvPUI = ContentPromptUI.Create({
     resolveCurrent = function(instanceInfo)
         return PvP.ResolveCurrent(instanceInfo)
     end,
-    getConfigID = function(specID, key)
-        return DB:GetPvPConfigID(specID, key)
+    getLoadoutRef = function(contentKey)
+        return DB:GetPvPLoadoutRef(contentKey)
     end,
     getByKey = function(key)
         return PvP.GetByKey(key)

@@ -1,9 +1,5 @@
 LoadoutLocker = LoadoutLocker or {}
 
-function LoadoutLocker.Print(msg)
-    print("|cff00ccffLoadoutLocker:|r " .. msg)
-end
-
 function LoadoutLocker.RefreshUI()
     if LoadoutLocker.RefreshTalentUI then
         LoadoutLocker.RefreshTalentUI()
@@ -13,6 +9,7 @@ end
 local C = LoadoutLocker.Constants
 local Items = LoadoutLocker.Items
 local Loadout = LoadoutLocker.Loadout
+local PromptUtils = LoadoutLocker.PromptUtils
 
 local DB = LoadoutLocker.DB
 local EquipmentSet = LoadoutLocker.EquipmentSet
@@ -1039,9 +1036,11 @@ function Gear.DeleteSavedGear(configID, specID, notFoundMessage)
     return true
 end
 
-function Gear.CopyGearSetToLoadout(sourceConfigID, targetConfigID, specID)
-    specID = RequireSpecID(specID)
-    if not specID then
+function Gear.CopyGearSetToLoadout(sourceConfigID, targetConfigID, sourceSpecID, targetSpecID)
+    sourceSpecID = sourceSpecID or Loadout.GetSpecID()
+    targetSpecID = targetSpecID or sourceSpecID
+    if not sourceSpecID or not targetSpecID then
+        Print("No specialization available.")
         return false
     end
 
@@ -1050,7 +1049,7 @@ function Gear.CopyGearSetToLoadout(sourceConfigID, targetConfigID, specID)
         return false
     end
 
-    if sourceConfigID == targetConfigID then
+    if sourceSpecID == targetSpecID and sourceConfigID == targetConfigID then
         Print("Source and target loadouts must be different.")
         return false
     end
@@ -1060,15 +1059,17 @@ function Gear.CopyGearSetToLoadout(sourceConfigID, targetConfigID, specID)
         return false
     end
 
-    if not DB:HasGearSet(specID, sourceConfigID) then
+    if not DB:HasGearSet(sourceSpecID, sourceConfigID) then
         Print("No saved gear set to copy from that loadout.")
         return false
     end
 
-    local sourceName = Loadout.GetLoadoutName(sourceConfigID)
-    local targetName = Loadout.GetLoadoutName(targetConfigID)
-    DB:CopyGearSetToLoadout(specID, sourceConfigID, targetConfigID, targetName)
-    EquipmentSet.LinkCopiedLoadouts(specID, sourceConfigID, targetConfigID)
+    local sourceName = Loadout.FormatLoadoutLabel(sourceSpecID, Loadout.GetLoadoutName(sourceConfigID))
+    local targetName = Loadout.FormatLoadoutLabel(targetSpecID, Loadout.GetLoadoutName(targetConfigID))
+    DB:CopyGearSetToLoadout(targetSpecID, sourceConfigID, targetConfigID, Loadout.GetLoadoutName(targetConfigID), sourceSpecID)
+    if sourceSpecID == targetSpecID then
+        EquipmentSet.LinkCopiedLoadouts(targetSpecID, sourceConfigID, targetConfigID)
+    end
     Print(string.format("Copied gear set from %s to %s.", sourceName, targetName))
     RefreshUI()
     return true
@@ -1115,7 +1116,7 @@ function Gear.IsSwapActive()
 end
 
 function Gear.ScheduleLoadoutGearApply()
-    if specChangeInProgress then
+    if specChangeInProgress or Loadout.IsAwaitingTalentSwitchAfterSpec() then
         return
     end
 
@@ -1431,6 +1432,10 @@ local function PromptAndApplyGear(specID, configID, gearSet, options)
 end
 
 function Gear.ApplyGearForLoadoutChange()
+    if Loadout.IsAwaitingTalentSwitchAfterSpec() then
+        return
+    end
+
     if LoadoutLocker.Upgrades.IsPromptActive() or IsGearSwapActive() then
         Gear.ScheduleLoadoutGearApply()
         return
@@ -1455,6 +1460,7 @@ function Gear.ApplyGearForLoadoutChange()
     local shouldRunUpgrades = Loadout.ShouldRunUpgradeCheck(specID, configID)
 
     if not shouldApplyGear and not shouldRunUpgrades then
+        PromptUtils.NotifyPromptGearStepFinished(specID, configID)
         return
     end
 
@@ -1462,10 +1468,9 @@ function Gear.ApplyGearForLoadoutChange()
 
     local gearSet = DB:GetGearSet(specID, configID)
     if not gearSet then
-        if not Loadout.IsStarterBuild(configID) then
-            Loadout.RememberAppliedSpec(specID)
-            Loadout.RememberUpgradeCheck(specID, configID)
-        end
+        Loadout.RememberAppliedSpec(specID)
+        Loadout.RememberUpgradeCheck(specID, configID)
+        PromptUtils.NotifyPromptGearStepFinished(specID, configID)
         return
     end
 
@@ -1479,8 +1484,12 @@ function Gear.ApplyGearForLoadoutChange()
             Loadout.RememberAppliedSpec(specID)
             Loadout.RememberUpgradeCheck(specID, configID)
             ReleaseGearApplyLock()
+            PromptUtils.NotifyPromptGearStepFinished(specID, configID)
         end,
-        onApplyFailed = ReleaseGearApplyLock,
+        onApplyFailed = function()
+            ReleaseGearApplyLock()
+            PromptUtils.NotifyPromptGearStepFinished(specID, configID)
+        end,
     }
     if shouldRunUpgrades or DB:AreUpgradeChecksEnabled() then
         applyOptions.forceUpgradeCheck = true
@@ -1550,9 +1559,59 @@ local function ScheduleSpecGearApply(attempt)
     end)
 end
 
+function Gear.OnTalentSwitchAfterSpecComplete()
+    specChangeInProgress = false
+    Gear.ScheduleLoadoutGearApply()
+end
+
 function Gear.OnSpecChanged()
     specChangeInProgress = true
-    Loadout.ClearPendingSwitch()
+
+    local pending = Loadout.PeekPendingSwitch()
+    local currentSpecID = Loadout.GetSpecID()
+    if pending and pending.specID == currentSpecID and Loadout.IsAwaitingTalentSwitchAfterSpec() then
+        PromptUtils.MarkSpecSwitchComplete()
+        PromptUtils.SetPromptLoadingStep(PromptUtils.STEP_CHANGING_TALENTS)
+        Loadout.ConsumePendingSwitch()
+        local targetSpecID = pending.specID
+        local targetConfigID = pending.configID
+
+        C_Timer.After(C.SPEC_TALENT_SWITCH_DELAY, function()
+            if Loadout.GetSpecID() ~= targetSpecID then
+                Loadout.ClearAwaitingTalentSwitchAfterSpec()
+                specChangeInProgress = false
+                PromptUtils.FailPendingPromptSwitch("spec")
+                return
+            end
+
+            local ok, reason = Loadout.SwitchTo(targetConfigID, targetSpecID)
+            if not ok and reason ~= "unchanged" then
+                Loadout.ClearAwaitingTalentSwitchAfterSpec()
+                specChangeInProgress = false
+                PromptUtils.FailPendingPromptSwitch(reason or "talent")
+            elseif reason == "unchanged" then
+                Loadout.ClearAwaitingTalentSwitchAfterSpec()
+                Gear.OnTalentSwitchAfterSpecComplete()
+                PromptUtils.OnPromptLoadoutTalentsApplied(targetSpecID, targetConfigID)
+            end
+
+            RefreshUI()
+        end)
+        return
+    end
+
+    if Loadout.IsAwaitingTalentSwitchAfterSpec() then
+        local awaiting = Loadout.GetAwaitingTalentSwitchAfterSpec()
+        Loadout.ClearAwaitingTalentSwitchAfterSpec()
+        if awaiting and awaiting.specID ~= currentSpecID then
+            PromptUtils.FailPendingPromptSwitch("spec")
+        end
+    end
+
+    if pending then
+        Loadout.ClearPendingSwitch()
+    end
+
     ScheduleSpecGearApply(1)
 
     C_Timer.After(0, function()
