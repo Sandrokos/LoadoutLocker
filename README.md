@@ -66,7 +66,7 @@ Use the **Dungeons**, **Raids**, **Delves**, and **PvP** tabs to pick a default 
 
 When you enter matching content (or after a raid boss kill, when remaining bosses need different loadouts), LoadoutLocker shows a prompt to switch loadouts. Click **Switch Loadout** to apply the assignment; click **Not now** to dismiss it for the current visit.
 
-Raid prompts respect your lockout progress — bosses you have already killed are skipped.
+Raid prompts appear when you enter a raid and after each boss kill, grouped by assigned loadout.
 
 Toggle each prompt type on the **General** tab:
 

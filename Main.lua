@@ -9,9 +9,9 @@ local Loadout = LoadoutLocker.Loadout
 local Menu = LoadoutLocker.Menu
 local PromptUtils = LoadoutLocker.PromptUtils
 local DungeonUI = LoadoutLocker.DungeonUI
-local RaidUI = LoadoutLocker.RaidUI
 local DelveUI = LoadoutLocker.DelveUI
 local PvPUI = LoadoutLocker.PvPUI
+local RaidUI = LoadoutLocker.RaidUI
 local OnboardingUI = LoadoutLocker.OnboardingUI
 
 local loginSynced
@@ -21,23 +21,28 @@ local function PrintMenuReminder()
     Print("Type " .. Text.FormatCommand() .. " to open the menu.")
 end
 
-local function HandleTraitConfigUpdated()
-    Loadout.InvalidateListCache()
-    local specID = Loadout.GetSpecID()
-    local configID = specID and Loadout.GetLoadoutConfigID(specID)
+local function OnLoadoutTalentsCommitted(specID, configID)
     local awaiting = Loadout.GetAwaitingTalentSwitchAfterSpec()
-    if awaiting then
-        if specID == awaiting.specID and configID == awaiting.configID then
-            Loadout.ClearAwaitingTalentSwitchAfterSpec()
-            Gear.OnTalentSwitchAfterSpecComplete()
-        end
-    else
+    if awaiting and specID == awaiting.specID and configID == awaiting.configID then
+        Loadout.ClearAwaitingTalentSwitchAfterSpec()
+        Gear.OnTalentSwitchAfterSpecComplete()
+    end
+
+    local handledPending = false
+    if specID and configID then
+        handledPending = PromptUtils.OnPromptLoadoutTalentsApplied(specID, configID)
+    end
+
+    if not handledPending and not PromptUtils.HasPendingPromptSwitch() then
         Gear.ScheduleLoadoutGearApply()
     end
-    if specID and configID then
-        PromptUtils.OnPromptLoadoutTalentsApplied(specID, configID)
-    end
 end
+
+local function HandleTraitConfigUpdated()
+    Loadout.InvalidateListCache()
+end
+
+Loadout.SetTalentCommitCompleteHandler(OnLoadoutTalentsCommitted)
 
 local function ScheduleTraitConfigUpdated()
     if traitConfigUpdateTimer then
@@ -59,7 +64,7 @@ local function ShowHelp()
     Print("/locker sim dungeon - Preview the dungeon loadout prompt")
     Print("/locker sim delve - Preview the delve loadout prompt")
     Print("/locker sim pvp [arena|battleground] - Preview the PvP loadout prompt")
-    Print("/locker sim raid [march] - Simulate being inside a raid")
+    Print("/locker sim raid [raid] - Open raid simulation panel")
     Print("/locker sim raid stop - End raid simulation")
     Print("/locker debug - Open bug report with debug info")
     Print("/locker tutorial - Show the getting started guide")
@@ -92,11 +97,21 @@ local function HandleSlashCommand(msg)
             PvPUI.Simulate(mode)
         end
     elseif msg == "sim raid stop" or msg == "sim raid off" then
-        RaidUI.Simulate("stop")
+        if RaidUI then
+            RaidUI.Simulate("stop")
+        end
     elseif msg == "sim raid" or msg == "simraid" then
-        RaidUI.Simulate()
+        if RaidUI then
+            RaidUI.Simulate()
+        else
+            Print("Raid UI is unavailable. Check /script for addon load errors, then /reload.")
+        end
     elseif msg:match("^sim raid ") then
-        RaidUI.Simulate(strtrim(msg:sub(10)))
+        if RaidUI then
+            RaidUI.Simulate(strtrim(msg:sub(10)))
+        else
+            Print("Raid UI is unavailable. Check /script for addon load errors, then /reload.")
+        end
     elseif msg == "debug" or msg == "debug raid" then
         LoadoutLocker.BugReportUI.ShowDebugOutput()
     elseif msg == "tutorial" or msg == "onboarding" or msg == "guide" then

@@ -15,7 +15,7 @@ function PromptUtils.PrintSwitchFailure(reason)
     elseif reason == "talent" then
         Print("Could not switch talent loadout after specialization change.")
     elseif reason == "cancelled" then
-        Print("Loadout switch cancelled.")
+        Print("Swap cancelled.")
     elseif reason == "timeout" then
         Print("Loadout switch timed out. Please try again.")
     elseif reason ~= "unchanged" then
@@ -29,6 +29,10 @@ local switchMonitorFrame
 local function ClearPendingLoadoutSwitchState()
     Loadout.ClearAwaitingTalentSwitchAfterSpec()
     Loadout.ClearPendingSwitch()
+    Loadout.CancelTalentCommit()
+    if LoadoutLocker.Gear and LoadoutLocker.Gear.CancelLoadoutSwitch then
+        LoadoutLocker.Gear.CancelLoadoutSwitch()
+    end
 end
 
 local function FailWaitingSpecSwitch(reason)
@@ -43,8 +47,7 @@ local function FailWaitingSpecSwitch(reason)
         end
     end
 
-    ClearPendingLoadoutSwitchState()
-    PromptUtils.FailPendingPromptSwitch(reason or "cancelled")
+    Loadout.AbortLoadoutSwitch(reason or "cancelled")
 end
 
 local function EnsureSwitchMonitor()
@@ -67,7 +70,7 @@ end
 
 local function HidePromptButtons(frame)
     for _, child in ipairs({ frame:GetChildren() }) do
-        if child:IsObjectType("Button") and child:IsShown() then
+        if child:IsObjectType("Button") and child ~= frame.dismissButton and child:IsShown() then
             child:Disable()
             child:Hide()
         end
@@ -77,7 +80,6 @@ end
 local DOT_SPINNER_COUNT = 8
 local DOT_SPINNER_SIZE = 5
 local DOT_SPINNER_RADIUS = 13
-local DOT_SPINNER_STEP_TIME = 0.07
 
 local function GetSpinnerColor()
     return C.UI_TITLE_COLOR
@@ -111,9 +113,13 @@ local function UpdateDotSpinner(spinner)
     end
 end
 
-local function StartLoadingSpinnerAnimation(spinner)
+local function StartLoadingSpinnerAnimation(spinner, restart)
     if not spinner.dots then
         CreateDotSpinner(spinner)
+    end
+
+    if spinner.ticker and not restart then
+        return
     end
 
     spinner.spinnerColor = GetSpinnerColor()
@@ -124,7 +130,7 @@ local function StartLoadingSpinnerAnimation(spinner)
     if spinner.ticker then
         spinner.ticker:Cancel()
     end
-    spinner.ticker = C_Timer.NewTicker(DOT_SPINNER_STEP_TIME, function()
+    spinner.ticker = C_Timer.NewTicker(C.DOT_SPINNER_STEP_TIME, function()
         spinner.activeIndex = (spinner.activeIndex % DOT_SPINNER_COUNT) + 1
         UpdateDotSpinner(spinner)
     end)
@@ -141,6 +147,51 @@ local function StopLoadingSpinnerAnimation(spinner)
     spinner:Hide()
 end
 
+local LOADING_OVERLAY_INSETS = { left = 12, top = -28, right = -12, bottom = 12 }
+local DEFAULT_OVERLAY_INSETS = { left = 12, top = -36, right = -12, bottom = 36 }
+
+local function SetLoadingOverlayInsets(frame, insets)
+    if not frame.loadingOverlay then
+        return
+    end
+
+    frame.loadingOverlay:ClearAllPoints()
+    frame.loadingOverlay:SetPoint("TOPLEFT", frame, "TOPLEFT", insets.left, insets.top)
+    frame.loadingOverlay:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", insets.right, insets.bottom)
+end
+
+local function ApplyPromptLoadingLayout(frame)
+    if frame.promptLayoutSnapshot then
+        return
+    end
+
+    frame.promptLayoutSnapshot = {
+        width = frame:GetWidth(),
+        height = frame:GetHeight(),
+    }
+    frame:SetSize(C.PROMPT_LOADING_WIDTH, C.PROMPT_LOADING_HEIGHT)
+    SetLoadingOverlayInsets(frame, LOADING_OVERLAY_INSETS)
+
+    if frame.loadingText then
+        frame.loadingText:SetWidth(C.PROMPT_LOADING_WIDTH - 24)
+    end
+end
+
+local function RestorePromptLayout(frame)
+    local snapshot = frame and frame.promptLayoutSnapshot
+    if not snapshot then
+        return
+    end
+
+    frame:SetSize(snapshot.width, snapshot.height)
+    frame.promptLayoutSnapshot = nil
+    SetLoadingOverlayInsets(frame, DEFAULT_OVERLAY_INSETS)
+
+    if frame.loadingText then
+        frame.loadingText:SetWidth(300)
+    end
+end
+
 function PromptUtils.HidePromptLoadingIndicator(frame)
     if not frame then
         return
@@ -152,6 +203,7 @@ function PromptUtils.HidePromptLoadingIndicator(frame)
     if frame.loadingText then
         frame.loadingText:Hide()
     end
+    RestorePromptLayout(frame)
 end
 
 function PromptUtils.EnsurePromptLoading(frame)
@@ -167,12 +219,11 @@ function PromptUtils.EnsurePromptLoading(frame)
     end
 
     local overlay = CreateFrame("Frame", nil, frame)
-    overlay:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -36)
-    overlay:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 36)
+    frame.loadingOverlay = overlay
+    SetLoadingOverlayInsets(frame, DEFAULT_OVERLAY_INSETS)
     overlay:SetFrameLevel(frame:GetFrameLevel() + 20)
     overlay:EnableMouse(true)
     overlay:Hide()
-    frame.loadingOverlay = overlay
 
     frame.loadingText = overlay:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     frame.loadingText:SetPoint("CENTER", overlay, "CENTER", 0, 16)
@@ -189,7 +240,84 @@ end
 
 PromptUtils.STEP_CHANGING_SPEC = "Changing spec..."
 PromptUtils.STEP_CHANGING_TALENTS = "Changing talents..."
+PromptUtils.STEP_CHECKING_UPGRADES = "Checking upgrades..."
 PromptUtils.STEP_EQUIPPING_GEAR = "Equipping gear..."
+
+function PromptUtils.ResetPromptLoadingState(frame)
+    if not frame then
+        return
+    end
+
+    frame.isLoading = nil
+    PromptUtils.HidePromptLoadingIndicator(frame)
+end
+
+function PromptUtils.HideDismissButton(frame)
+    if not frame or not frame.dismissButton then
+        return
+    end
+
+    frame.dismissButton:Hide()
+    frame.dismissButton:Disable()
+end
+
+function PromptUtils.EnsureDismissButtonVisible(frame)
+    if not frame or not frame.dismissButton then
+        return
+    end
+
+    frame.dismissButton:Show()
+    frame.dismissButton:Enable()
+end
+
+function PromptUtils.DismissPromptFrame(frame, onDismiss)
+    if not frame then
+        return
+    end
+
+    if frame.isLoading and PromptUtils.HasPendingPromptSwitch() then
+        if onDismiss then
+            onDismiss()
+        end
+        Loadout.AbortLoadoutSwitch("cancelled")
+        return
+    end
+
+    if onDismiss then
+        onDismiss()
+    end
+
+    PromptUtils.HidePromptLoadingIndicator(frame)
+    frame.isLoading = nil
+    frame:Hide()
+end
+
+function PromptUtils.ConfigurePromptDismiss(frame, onDismiss)
+    if not frame or not frame.dismissButton then
+        return
+    end
+
+    frame.dismissButton:SetScript("OnClick", function()
+        PromptUtils.DismissPromptFrame(frame, onDismiss)
+    end)
+    PromptUtils.EnsureDismissButtonVisible(frame)
+end
+
+local function ShowLoadingOverlay(frame, stepText, restartSpinner)
+    PromptUtils.EnsurePromptLoading(frame)
+    if frame.HideChoiceContent then
+        frame.HideChoiceContent()
+    end
+    frame.loadingOverlay:Show()
+    frame.loadingSpinner:Show()
+    StartLoadingSpinnerAnimation(frame.loadingSpinner, restartSpinner)
+    if stepText then
+        frame.loadingText:SetText(stepText)
+    end
+    frame.loadingText:Show()
+    PromptUtils.HideDismissButton(frame)
+    ApplyPromptLoadingLayout(frame)
+end
 
 function PromptUtils.ShowPromptLoading(frame)
     PromptUtils.EnsurePromptLoading(frame)
@@ -206,11 +334,8 @@ function PromptUtils.ShowPromptLoading(frame)
     if frame.raidName then
         frame.raidName:Hide()
     end
-    frame.loadingOverlay:Show()
-    frame.loadingSpinner:Show()
-    StartLoadingSpinnerAnimation(frame.loadingSpinner)
-    frame.loadingText:Show()
     frame.isLoading = true
+    ShowLoadingOverlay(frame, nil, true)
 end
 
 function PromptUtils.SetPromptLoadingStep(stepText, frame)
@@ -219,30 +344,27 @@ function PromptUtils.SetPromptLoadingStep(stepText, frame)
         return
     end
 
-    PromptUtils.EnsurePromptLoading(frame)
-    frame.loadingOverlay:Show()
-    frame.loadingSpinner:Show()
-    StartLoadingSpinnerAnimation(frame.loadingSpinner)
-    frame.loadingText:SetText(stepText)
-    frame.loadingText:Show()
+    ShowLoadingOverlay(frame, stepText, false)
 end
 
 function PromptUtils.OnPromptLoadoutTalentsApplied(specID, configID)
     if not pendingPromptSwitch then
-        return
+        return false
     end
 
     specID = tonumber(specID)
     configID = tonumber(configID)
     if pendingPromptSwitch.specID ~= specID or pendingPromptSwitch.configID ~= configID then
-        return
+        return false
     end
     if not Loadout.IsAssignedLoadoutActive(specID, configID) then
-        return
+        return false
     end
 
     pendingPromptSwitch.talentsComplete = true
-    PromptUtils.SetPromptLoadingStep(PromptUtils.STEP_EQUIPPING_GEAR)
+    PromptUtils.SetPromptLoadingStep(PromptUtils.STEP_CHECKING_UPGRADES)
+    LoadoutLocker.Gear.ApplyGearForLoadoutChange()
+    return true
 end
 
 function PromptUtils.NotifyPromptGearStepFinished(specID, configID)
@@ -261,6 +383,10 @@ end
 
 function PromptUtils.HasPendingPromptSwitch()
     return pendingPromptSwitch ~= nil
+end
+
+function PromptUtils.ArePromptTalentsComplete()
+    return pendingPromptSwitch and pendingPromptSwitch.talentsComplete == true
 end
 
 function PromptUtils.MarkSpecSwitchComplete()
@@ -367,9 +493,8 @@ function PromptUtils.BeginPromptLoadoutSwitch(frame, specID, configID, onSuccess
                 FailWaitingSpecSwitch("cancelled")
             end
         end)
-    elseif Loadout.IsAssignedLoadoutActive(specID, configID) then
-        PromptUtils.OnPromptLoadoutTalentsApplied(specID, configID)
-        LoadoutLocker.Gear.ScheduleLoadoutGearApply()
+    elseif reason == "unchanged" then
+        Loadout.NotifyTalentCommitComplete(specID, configID)
     end
 end
 
@@ -452,6 +577,7 @@ function PromptUtils.CreatePromptFrame(options)
     frame.dismissButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     frame.dismissButton:SetSize(100, 22)
     frame.dismissButton:SetText("Not Now")
+    frame.dismissButton:SetFrameLevel(frame:GetFrameLevel() + 25)
     return frame
 end
 function PromptUtils.CreatePromptLabel(parent, anchor, offsetY, fontObject)

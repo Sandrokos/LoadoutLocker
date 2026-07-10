@@ -24,6 +24,7 @@ local loadoutApplyTimer
 local specChangeInProgress
 local equipmentSetSwapPending
 local gearApplyLocked
+local gearSwapCancelled
 local swapIdleCallbacks = {}
 local equipmentSetSwapCallbacks = {}
 
@@ -495,9 +496,7 @@ function Gear.BuildGearDiff(targetGearSet)
         if ShouldUnequipSlot(invSlot, targetGearSet, neededItems) then
             diff.unequip[#diff.unequip + 1] = invSlot
         end
-    end
 
-    for _, invSlot in ipairs(C.EQUIP_SLOTS) do
         local targetEntry = Gear.GetGearSetEntry(targetGearSet, invSlot)
         if targetEntry and not SlotSatisfiesTarget(invSlot, targetEntry) then
             diff.equip[#diff.equip + 1] = {
@@ -913,6 +912,12 @@ local function RunGearSwap(gearSet, onComplete, gearDiff)
     end
 
     local function Step()
+        if gearSwapCancelled then
+            equipQueueRunning = false
+            C_Timer.After(0, NotifySwapIdle)
+            return
+        end
+
         if InCombatLockdown() then
             equipQueueRunning = false
             Print("Combat started. Gear swap cancelled.")
@@ -1113,12 +1118,36 @@ function Gear.List(specID)
     end
 end
 
+function Gear.CancelLoadoutSwitch()
+    gearSwapCancelled = true
+    if loadoutApplyTimer then
+        loadoutApplyTimer:Cancel()
+        loadoutApplyTimer = nil
+    end
+    specChangeInProgress = false
+    ReleaseGearApplyLock()
+    equipQueueRunning = false
+    equipmentSetSwapPending = false
+    if LoadoutLocker.Upgrades.IsPromptActive() then
+        LoadoutLocker.Upgrades.DismissPrompt()
+    end
+    C_Timer.After(0, NotifySwapIdle)
+end
+
 function Gear.IsSwapActive()
     return IsGearSwapActive()
 end
 
 function Gear.ScheduleLoadoutGearApply()
     if specChangeInProgress or Loadout.IsAwaitingTalentSwitchAfterSpec() then
+        return
+    end
+
+    if Loadout.IsTalentCommitInProgress() then
+        return
+    end
+
+    if PromptUtils.HasPendingPromptSwitch() and not PromptUtils.ArePromptTalentsComplete() then
         return
     end
 
@@ -1134,10 +1163,6 @@ function Gear.ScheduleLoadoutGearApply()
         end
         Gear.ApplyGearForLoadoutChange()
     end)
-end
-
-local function ValidateEquippedGear(gearSet, onComplete)
-    RetryGearVerification(gearSet, 1, {}, onComplete)
 end
 
 local function RunUpgradeStep(specID, configID, gearSet, options, onComplete)
@@ -1196,80 +1221,60 @@ local function RunUpgradeStep(specID, configID, gearSet, options, onComplete)
     })
 end
 
+local function SetPromptLoadingStep(step)
+    if step and PromptUtils.HasPendingPromptSwitch() then
+        PromptUtils.SetPromptLoadingStep(step)
+    end
+end
+
+local function FinishGearApply(options, success, changed)
+    if success then
+        if changed then
+            Print(options.upgradedMessage or "Applied and saved upgraded gear set.")
+        elseif options.appliedMessage then
+            Print(options.appliedMessage)
+        end
+        if options.onApplied then
+            options.onApplied()
+        end
+    elseif options.onApplyFailed then
+        options.onApplyFailed()
+    end
+end
+
 local function RunUpgradeOnlyPipeline(specID, configID, gearSet, options)
     gearApplyLocked = true
 
-    local function finish(success, changed)
-        if success then
-            if changed then
-                Print(options.upgradedMessage or "Applied and saved upgraded gear set.")
-            end
-            if options.onApplied then
-                options.onApplied()
-            end
-        elseif options.onApplyFailed then
-            options.onApplyFailed()
-        end
-    end
-
     local function afterUpgrades(workingGearSet, changed)
+        local targetGearSet = workingGearSet or gearSet
         if changed then
-            SaveEquippedGearSet(specID, configID, workingGearSet)
-            finish(true, true)
-            return
+            SaveEquippedGearSet(specID, configID, targetGearSet)
         end
 
-        finish(true, false)
+        RetryGearVerification(targetGearSet, 1, {}, function(valid)
+            FinishGearApply(options, valid ~= false, changed)
+        end)
     end
 
     Gear.NormalizeGearSetKeys(gearSet)
-    local workingGearSet = BuildWorkingGearSet(gearSet)
+    SetPromptLoadingStep(PromptUtils.STEP_CHECKING_UPGRADES)
     RunUpgradeStep(specID, configID, gearSet, options, afterUpgrades)
 end
 
 local function RunLoadoutGearPipeline(specID, configID, gearSet, options)
-    local function finish(success, changed)
-        if success then
-            if changed then
-                Print(options.upgradedMessage or "Applied and saved upgraded gear set.")
-            elseif options.appliedMessage then
-                Print(options.appliedMessage)
-            end
-            if options.onApplied then
-                options.onApplied()
-            end
-        elseif options.onApplyFailed then
-            options.onApplyFailed()
+    local upgradeChanged = false
+
+    local function afterFinalValidation(valid, targetGearSet, changed)
+        if changed and targetGearSet then
+            SaveEquippedGearSet(specID, configID, targetGearSet)
         end
+        FinishGearApply(options, valid ~= false, changed)
     end
 
-    local function afterValidation(success, workingGearSet, changed)
-        finish(success, changed)
-    end
+    local function performEquip(targetGearSet)
+        SetPromptLoadingStep(PromptUtils.STEP_EQUIPPING_GEAR)
 
-    local function afterUpgrades(workingGearSet, changed)
-        if changed then
-            SaveEquippedGearSet(specID, configID, workingGearSet)
-        end
-
-        afterValidation(true, workingGearSet, changed)
-    end
-
-    Gear.NormalizeGearSetKeys(gearSet)
-    local workingGearSet = BuildWorkingGearSet(gearSet)
-
-    local function afterEquipmentSet()
-        RunUpgradeStep(specID, configID, gearSet, options, afterUpgrades)
-    end
-
-    local function fallbackManualSwap()
-        local diff = Gear.BuildGearDiff(gearSet)
-        if diff.empty then
-            afterEquipmentSet()
-            return
-        end
-
-        ApplyGearSwap(gearSet, function(ready)
+        local function afterEquip(ready)
             if not ready then
                 if options.onApplyFailed then
                     options.onApplyFailed()
@@ -1277,41 +1282,61 @@ local function RunLoadoutGearPipeline(specID, configID, gearSet, options)
                 return
             end
 
-            afterEquipmentSet()
-        end, diff)
-    end
+            RetryGearVerification(targetGearSet, 1, {}, function(valid)
+                afterFinalValidation(valid, targetGearSet, upgradeChanged)
+            end)
+        end
 
-    if EquipmentSet.TryUse(specID, configID) then
-        Gear.NormalizeGearSetKeys(gearSet)
-        if Gear.BuildGearDiff(gearSet).empty then
-            C_Timer.After(C.EQUIP_SLOT_DELAY, afterEquipmentSet)
+        local function fallbackManualSwap()
+            local diff = Gear.BuildGearDiff(targetGearSet)
+            if diff.empty then
+                afterEquip(true)
+                return
+            end
+
+            ApplyGearSwap(targetGearSet, function(ready)
+                afterEquip(ready ~= false)
+            end, diff)
+        end
+
+        if EquipmentSet.TryUse(specID, configID) then
+            Gear.NormalizeGearSetKeys(targetGearSet)
+            if Gear.BuildGearDiff(targetGearSet).empty then
+                C_Timer.After(C.EQUIP_SLOT_DELAY, function()
+                    afterEquip(true)
+                end)
+                return
+            end
+
+            equipmentSetSwapPending = true
+            swapEventFrame:RegisterEvent("EQUIPMENT_SWAP_FINISHED")
+            C_Timer.After(3, function()
+                if equipmentSetSwapPending then
+                    NotifyEquipmentSetSwapFinished()
+                end
+            end)
+
+            WaitForEquipmentSetSwap(fallbackManualSwap)
             return
         end
 
-        equipmentSetSwapPending = true
-        swapEventFrame:RegisterEvent("EQUIPMENT_SWAP_FINISHED")
-        C_Timer.After(3, function()
-            if equipmentSetSwapPending then
-                NotifyEquipmentSetSwapFinished()
-            end
-        end)
-
-        WaitForEquipmentSetSwap(function()
-            ValidateEquippedGear(gearSet, function(valid)
-                if not valid then
-                    if options.onApplyFailed then
-                        options.onApplyFailed()
-                    end
-                    return
-                end
-
-                afterEquipmentSet()
-            end)
-        end)
-        return
+        fallbackManualSwap()
     end
 
-    fallbackManualSwap()
+    local function afterUpgrades(workingGearSet, changed)
+        upgradeChanged = changed == true
+        performEquip(workingGearSet or gearSet)
+    end
+
+    Gear.NormalizeGearSetKeys(gearSet)
+
+    if options.forceUpgradeCheck or DB:AreUpgradeChecksEnabled() then
+        SetPromptLoadingStep(PromptUtils.STEP_CHECKING_UPGRADES)
+    else
+        SetPromptLoadingStep(PromptUtils.STEP_EQUIPPING_GEAR)
+    end
+
+    RunUpgradeStep(specID, configID, gearSet, options, afterUpgrades)
 end
 
 local function PromptAndApplyGear(specID, configID, gearSet, options)
@@ -1420,7 +1445,17 @@ local function PromptAndApplyGear(specID, configID, gearSet, options)
 end
 
 function Gear.ApplyGearForLoadoutChange()
+    gearSwapCancelled = false
+
     if Loadout.IsAwaitingTalentSwitchAfterSpec() then
+        return
+    end
+
+    if Loadout.IsTalentCommitInProgress() then
+        return
+    end
+
+    if PromptUtils.HasPendingPromptSwitch() and not PromptUtils.ArePromptTalentsComplete() then
         return
     end
 
@@ -1549,7 +1584,6 @@ end
 
 function Gear.OnTalentSwitchAfterSpecComplete()
     specChangeInProgress = false
-    Gear.ScheduleLoadoutGearApply()
 end
 
 function Gear.OnSpecChanged()
@@ -1580,7 +1614,7 @@ function Gear.OnSpecChanged()
             elseif reason == "unchanged" then
                 Loadout.ClearAwaitingTalentSwitchAfterSpec()
                 Gear.OnTalentSwitchAfterSpecComplete()
-                PromptUtils.OnPromptLoadoutTalentsApplied(targetSpecID, targetConfigID)
+                Loadout.NotifyTalentCommitComplete(targetSpecID, targetConfigID)
             end
 
             RefreshUI()

@@ -29,10 +29,10 @@ local TAB_INTRO = {
     general = Text.COPY.TAGLINE,
     priority = "When upgrade prompts appear, higher stats at the top break ties between same item level and track.",
     loadouts = "Review talent loadouts across all specializations, manage saved gear sets, ignored upgrade slots, and copying between loadouts.",
-    dungeons = "Set a default talent loadout and optional per-dungeon overrides from any saved loadout (Spec-Talent name). Use the category buttons above to browse season and expansion dungeons.",
-    raids = "Set a default raid loadout and optional per-boss overrides from any saved loadout. In-game prompts respect your lockout progress and can switch specialization.",
-    delves = "Set a default delve loadout and optional per-delve overrides from any saved loadout. Use the Midnight or TWW buttons above to browse delves.",
-    pvp = "Set a default PvP loadout and optional overrides for arenas and battlegrounds from any saved loadout.",
+    dungeons = "Set a default talent loadout and optional per-dungeon overrides from saved loadouts (Spec-Talent name). Use the category buttons above to browse season and expansion dungeons.",
+    raids = "Set a default raid loadout and optional per-boss overrides from saved loadouts. In-game prompts appear when you enter a raid and after boss kills.",
+    delves = "Set a default delve loadout and optional per-delve overrides from saved loadouts. Use the Midnight or TWW buttons above to browse delves.",
+    pvp = "Set a default PvP loadout and optional overrides for arenas and battlegrounds from saved loadouts.",
 }
 local selectedManageLoadoutKey
 local selectedCopySourceKey
@@ -71,16 +71,6 @@ local function ResolveLoadoutDropdownValue(ref, emptyValue)
     return tostring(ref)
 end
 
-local function CopyDropdownList(source)
-    local copy = {}
-    if source then
-        for key, label in pairs(source) do
-            copy[key] = label
-        end
-    end
-    return copy
-end
-
 local function BuildLoadoutKeyDropdownList(entries, options)
     options = options or {}
     local list = {}
@@ -104,16 +94,26 @@ local function BuildLoadoutKeyDropdownList(entries, options)
     return list
 end
 
-local function EnsureLoadoutInDropdown(list, ref)
-    if type(ref) ~= "table" or not ref.specID or not ref.configID then
-        return list
-    end
-
-    local key = Loadout.EncodeLoadoutKey(ref.specID, ref.configID)
-    if not list[key] then
-        list[key] = Loadout.FormatLoadoutLabel(ref.specID, Loadout.GetLoadoutName(ref.configID))
+local function BuildContentAssignmentDropdownList(options)
+    options = options or {}
+    local list = BuildLoadoutKeyDropdownList(Loadout.GetAllSavedLoadoutList(), options)
+    if not next(list) and not options.includeNone and not options.includeUseDefault then
+        list[""] = "No saved loadouts"
     end
     return list
+end
+
+local function ResolveAssignmentDropdownValue(ref, fallback, list)
+    if not ref then
+        return fallback
+    end
+
+    local value = ResolveLoadoutDropdownValue(ref, fallback)
+    if value ~= fallback and not list[value] then
+        return fallback
+    end
+
+    return value
 end
 
 local function GetOverrideDropdownState(overrideList, override)
@@ -124,32 +124,36 @@ local function GetOverrideDropdownState(overrideList, override)
         }
     end
 
-    local value = ResolveLoadoutDropdownValue(override, "default")
-    if type(override) ~= "table" or not override.specID or not override.configID then
-        return value, overrideList
-    end
+    return ResolveAssignmentDropdownValue(override, "default", overrideList), overrideList
+end
 
-    local key = Loadout.EncodeLoadoutKey(override.specID, override.configID)
-    if overrideList[key] then
-        return value, overrideList
-    end
-
-    local list = CopyDropdownList(overrideList)
-    list[key] = Loadout.FormatLoadoutLabel(override.specID, Loadout.GetLoadoutName(override.configID))
-    return value, list
+local function AddContentAssignmentRow(builder, overrideList, label, getOverrideRef, clearRef, setRef)
+    Widgets.AddAssignmentRow(
+        builder,
+        label,
+        function()
+            return GetOverrideDropdownState(overrideList, getOverrideRef())
+        end,
+        function(key)
+            if key == "default" then
+                clearRef()
+            else
+                setRef(key)
+            end
+        end
+    )
 end
 
 local function AddDefaultLoadoutDropdown(builder, getDefaultRef, setDefaultRef)
-    local defaultRef = getDefaultRef()
-    local list = BuildLoadoutKeyDropdownList(Loadout.GetAllConfigList(), { includeNone = true })
-    list = EnsureLoadoutInDropdown(list, defaultRef)
+    local list = BuildContentAssignmentDropdownList({ includeNone = true })
+    local value = ResolveAssignmentDropdownValue(getDefaultRef(), "", list)
     return Widgets.AddDropdown(
         builder,
         220,
         list,
-        ResolveLoadoutDropdownValue(defaultRef, ""),
-        function(value)
-            setDefaultRef(value == "" and nil or value)
+        value,
+        function(selected)
+            setDefaultRef(selected == "" and nil or selected)
         end
     )
 end
@@ -385,18 +389,21 @@ local function BuildAssignmentSection(scrollChild, items, overrideList, token, t
         if not IsAssignmentSectionBuildValid(token, tabID) then
             return
         end
-        Widgets.AddAssignmentRow(
+        AddContentAssignmentRow(
             builder,
+            overrideList,
             item.name,
             function()
-                return GetOverrideDropdownState(overrideList, overrides and overrides[item.key])
+                return overrides and overrides[item.key]
+            end,
+            function()
+                clearLoadoutRef(item.key)
+                if onChanged then
+                    onChanged()
+                end
             end,
             function(key)
-                if key == "default" then
-                    clearLoadoutRef(item.key)
-                else
-                    setLoadoutRef(item.key, key)
-                end
+                setLoadoutRef(item.key, key)
                 if onChanged then
                     onChanged()
                 end
@@ -545,7 +552,7 @@ local function BuildSubTabAssignmentsTab(content, config)
     local tabID = config.tabID
     Shell:ClearFrame(content.subBar)
     Shell:ClearFrame(content.header)
-    local overrideList = BuildLoadoutKeyDropdownList(Loadout.GetAllConfigList(), { includeUseDefault = true })
+    local overrideList = BuildContentAssignmentDropdownList({ includeUseDefault = true })
     local sections = config.getSections()
     LayoutSubTabButtons(content.subBar, sections, config.subBarRows, subTabButtons[tabID], function(section)
         SelectSubTabSection(content, section, overrideList, config)
@@ -585,7 +592,7 @@ local function BuildRaidsTab(content)
         DB:SetRaidDefaultConfigID(nil, value)
     end)
     Widgets.AddGap(builder, 10)
-    local overrideList = BuildLoadoutKeyDropdownList(Loadout.GetAllConfigList(), { includeUseDefault = true })
+    local overrideList = BuildContentAssignmentDropdownList({ includeUseDefault = true })
     for _, section in ipairs(Raids.GetMenuSections()) do
         Widgets.AddHeading(builder, section.header)
         for raidIndex, raid in ipairs(section.raids) do
@@ -596,18 +603,18 @@ local function BuildRaidsTab(content)
             end
             Widgets.AddHeading(builder, raid.name)
             for _, boss in ipairs(raid.bosses) do
-                Widgets.AddAssignmentRow(
+                AddContentAssignmentRow(
                     builder,
+                    overrideList,
                     boss.name,
                     function()
-                        return GetOverrideDropdownState(overrideList, raidAssignment and raidAssignment.bosses[boss.key])
+                        return raidAssignment and raidAssignment.bosses[boss.key]
+                    end,
+                    function()
+                        DB:ClearRaidBossConfigID(nil, raid.key, boss.key)
                     end,
                     function(key)
-                        if key == "default" then
-                            DB:ClearRaidBossConfigID(nil, raid.key, boss.key)
-                        else
-                            DB:SetRaidBossConfigID(nil, raid.key, boss.key, key)
-                        end
+                        DB:SetRaidBossConfigID(nil, raid.key, boss.key, key)
                     end
                 )
             end
@@ -620,22 +627,22 @@ local function BuildContentAssignmentsTab(builder, intro, getDefaultLoadoutRef, 
     Widgets.AddLabel(builder, "Default loadout")
     AddDefaultLoadoutDropdown(builder, getDefaultLoadoutRef, setDefaultLoadoutRef)
     Widgets.AddGap(builder, 10)
-    local overrideList = BuildLoadoutKeyDropdownList(Loadout.GetAllConfigList(), { includeUseDefault = true })
+    local overrideList = BuildContentAssignmentDropdownList({ includeUseDefault = true })
     for _, section in ipairs(getSections()) do
         Widgets.AddHeading(builder, section.header)
         for _, item in ipairs(section[collectionKey]) do
-            Widgets.AddAssignmentRow(
+            AddContentAssignmentRow(
                 builder,
+                overrideList,
                 item.name,
                 function()
-                    return GetOverrideDropdownState(overrideList, getOverride(item.key))
+                    return getOverride(item.key)
+                end,
+                function()
+                    clearLoadoutRef(item.key)
                 end,
                 function(key)
-                    if key == "default" then
-                        clearLoadoutRef(item.key)
-                    else
-                        setLoadoutRef(item.key, key)
-                    end
+                    setLoadoutRef(item.key, key)
                 end
             )
         end

@@ -38,9 +38,8 @@ function ContentPromptUI.Create(config)
         frame.swapButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOM", -8, 14)
         frame.swapButton:SetText("Switch Loadout")
         frame.dismissButton:SetPoint("BOTTOMLEFT", frame, "BOTTOM", 8, 14)
-        frame.dismissButton:SetScript("OnClick", function()
+        PromptUtils.ConfigurePromptDismiss(frame, function()
             dismissedKey = frame.contentKey
-            HidePrompt()
         end)
         promptFrame = frame
         return frame
@@ -66,8 +65,7 @@ function ContentPromptUI.Create(config)
         frame.content:Show()
         frame.loadout:SetText("Switch to: " .. Loadout.FormatLoadoutLabel(specID, Loadout.GetLoadoutName(configID)))
         frame.loadout:Show()
-        frame.isLoading = nil
-        PromptUtils.HidePromptLoadingIndicator(frame)
+        PromptUtils.ResetPromptLoadingState(frame)
         local configured = PromptUtils.ConfigureLoadoutSwitchButton(
             frame.swapButton,
             specID,
@@ -78,14 +76,13 @@ function ContentPromptUI.Create(config)
         )
         if configured then
             frame.swapButton:Enable()
-            frame.dismissButton:Enable()
         else
             frame.loadout:SetText(
                 frame.loadout:GetText() .. "\n|cffff2020Cannot switch to that specialization.|r"
             )
             frame.swapButton:Disable()
-            frame.dismissButton:Enable()
         end
+        PromptUtils.EnsureDismissButtonVisible(frame)
         frame:Show()
     end
 

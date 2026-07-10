@@ -10,14 +10,32 @@ local Instance = LoadoutLocker.Instance
 local Loadout = LoadoutLocker.Loadout
 local PromptUtils = LoadoutLocker.PromptUtils
 local Print = LoadoutLocker.Print
+local Widgets = LoadoutLocker.MenuWidgets
+local Catalog = LoadoutLocker.RaidCatalog
 
 local promptFrame
+local simFrame
 local choiceButtons = {}
+local choiceLabels = {}
+local simRaidButtons = {}
+local simBossRows = {}
 local dismissedRaidKey
 local lastRaidKey
 local simulatedRaidKey
+local simulatedKills = {}
+local stoppingSim
 local MAX_CHOICES = 8
+local MAX_SIM_BOSSES = 8
 local ENTER_EVALUATE_DELAY = 2.0
+local PROMPT_MIN_WIDTH = 360
+local PROMPT_MAX_WIDTH = 520
+local PROMPT_PADDING = 40
+local CHOICE_BUTTON_WIDTH = 220
+local CHOICE_BUTTON_HEIGHT = 22
+local LOADOUT_BUTTON_TEXT_MAX = 35
+local CHOICE_TOP_OFFSET = -72
+local CHOICE_ROW_GAP = 14
+local FRAME_BOTTOM_PAD = 50
 
 local DEFAULT_RAID_SIM_KEY = "march_on_quel_danas"
 
@@ -27,21 +45,42 @@ local RAID_SIM_ALIASES = {
     ["quel'danas"] = DEFAULT_RAID_SIM_KEY,
     ["quel danas"] = DEFAULT_RAID_SIM_KEY,
     rotmire = "sporefall",
+    voidspire = "voidspire",
+    void = "voidspire",
+    dreamrift = "dreamrift",
+    dream = "dreamrift",
+    sporefall = "sporefall",
 }
 
 local ScheduleEvaluate = PromptUtils.CreateScheduleEvaluate(function()
     RaidUI.Evaluate()
 end)
 
-local function HidePrompt()
-    if promptFrame then
-        promptFrame:Hide()
+local function HideChoiceContent()
+    for index = 1, MAX_CHOICES do
+        if choiceLabels[index] then
+            choiceLabels[index]:Hide()
+        end
+        if choiceButtons[index] then
+            choiceButtons[index]:Hide()
+        end
     end
+end
+
+local function HidePrompt()
+    if not promptFrame then
+        return
+    end
+
+    HideChoiceContent()
+
+    PromptUtils.ResetPromptLoadingState(promptFrame)
+    promptFrame:Hide()
 end
 
 local function CreateChoiceButton(parent, index)
     local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    button:SetSize(300, 24)
+    button:SetSize(CHOICE_BUTTON_WIDTH, CHOICE_BUTTON_HEIGHT)
     choiceButtons[index] = button
     return button
 end
@@ -59,50 +98,191 @@ local function EnsurePromptFrame()
 
     frame.raidName = PromptUtils.CreatePromptLabel(frame, frame.title)
     frame.help = PromptUtils.CreatePromptLabel(frame, frame.raidName, -4, "GameFontDisableSmall")
-    frame.help:SetText("Remaining bosses need different loadouts:")
+    frame.help:SetText("Assigned loadouts for this raid:")
 
-    frame.dismissButton:SetScript("OnClick", function()
+    PromptUtils.ConfigurePromptDismiss(frame, function()
         dismissedRaidKey = frame.raidKey
-        HidePrompt()
     end)
+
+    frame.HideChoiceContent = HideChoiceContent
 
     promptFrame = frame
     return frame
 end
 
-local function LayoutChoiceButtons(frame, choices)
-    for index = 1, MAX_CHOICES do
-        local button = choiceButtons[index]
-        if button then
-            button:Hide()
+local function CreateChoiceLabel(parent, index)
+    local label = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    label:SetWordWrap(true)
+    label:SetJustifyH("CENTER")
+    choiceLabels[index] = label
+    return label
+end
+
+local function TruncateButtonText(text, maxLength)
+    if not text or #text <= maxLength then
+        return text
+    end
+
+    return text:sub(1, maxLength - 3) .. "..."
+end
+
+local function FormatLoadoutButtonText(loadoutLabel)
+    return TruncateButtonText(loadoutLabel or "Switch", LOADOUT_BUTTON_TEXT_MAX)
+end
+
+local function FormatBossLabel(bossNames)
+    return table.concat(bossNames, "\n")
+end
+
+local function MeasureMultilineTextWidth(measurer, text)
+    text = text or ""
+    measurer.measureCache = measurer.measureCache or {}
+    local cached = measurer.measureCache[text]
+    if cached then
+        return cached
+    end
+
+    local maxWidth = 0
+
+    for line in string.gmatch(text, "[^\n]+") do
+        measurer:SetText(line)
+        maxWidth = math.max(maxWidth, measurer:GetStringWidth())
+    end
+
+    measurer.measureCache[text] = maxWidth
+    return maxWidth
+end
+
+local function NeedsPromptForChoices(choices)
+    for _, choice in ipairs(choices) do
+        if not choice.isActive then
+            return true
         end
     end
 
-    local topOffset = -72
-    local spacing = 28
+    return false
+end
 
+local function CollectBossNames(bossList)
+    local names = {}
+
+    for _, boss in ipairs(bossList) do
+        names[#names + 1] = boss.name
+    end
+
+    return names
+end
+
+local function BuildChoicesMeasureKey(choices)
+    local parts = {}
     for index, choice in ipairs(choices) do
+        parts[index] = string.format("%s\0%s", choice.bossLabel or "", choice.loadoutLabel or "")
+    end
+    return table.concat(parts, "\1")
+end
+
+local function MeasurePromptWidth(frame, choices)
+    local measureKey = BuildChoicesMeasureKey(choices)
+    if frame.promptMeasureKey == measureKey and frame.promptMeasuredWidth then
+        return frame.promptMeasuredWidth
+    end
+
+    local maxWidth = PROMPT_MIN_WIDTH
+    local measurer = frame.measureFont
+    if not measurer then
+        measurer = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        measurer:SetWordWrap(false)
+        frame.measureFont = measurer
+    end
+
+    for _, choice in ipairs(choices) do
+        maxWidth = math.max(
+            maxWidth,
+            math.min(MeasureMultilineTextWidth(measurer, choice.bossLabel), CHOICE_BUTTON_WIDTH) + PROMPT_PADDING,
+            CHOICE_BUTTON_WIDTH + PROMPT_PADDING
+        )
+        measurer:SetText(FormatLoadoutButtonText(choice.loadoutLabel) or "Active")
+        maxWidth = math.max(maxWidth, measurer:GetStringWidth() + PROMPT_PADDING, CHOICE_BUTTON_WIDTH + PROMPT_PADDING)
+    end
+
+    local width = math.min(math.max(maxWidth, PROMPT_MIN_WIDTH), PROMPT_MAX_WIDTH)
+    frame.promptMeasureKey = measureKey
+    frame.promptMeasuredWidth = width
+    return width
+end
+
+local function LayoutChoiceButtons(frame, choices)
+    for index = 1, MAX_CHOICES do
+        if choiceLabels[index] then
+            choiceLabels[index]:Hide()
+        end
+        if choiceButtons[index] then
+            choiceButtons[index]:Hide()
+        end
+    end
+
+    local frameWidth = MeasurePromptWidth(frame, choices)
+    frame:SetWidth(frameWidth)
+    local labelWidth = frameWidth - PROMPT_PADDING
+
+    if frame.raidName then
+        frame.raidName:SetWidth(labelWidth)
+    end
+    if frame.help then
+        frame.help:SetWidth(labelWidth)
+    end
+
+    local y = CHOICE_TOP_OFFSET
+    for index, choice in ipairs(choices) do
+        local label = choiceLabels[index] or CreateChoiceLabel(frame, index)
+        label:ClearAllPoints()
+        label:SetWidth(CHOICE_BUTTON_WIDTH)
+        local bossLabel = choice.bossLabel or ""
+        label:SetText(bossLabel)
+        local labelHeight = 0
+        if bossLabel ~= "" then
+            label:Show()
+            label:SetPoint("TOP", frame, "TOP", 0, y)
+            labelHeight = label:GetStringHeight() or 14
+            y = y - labelHeight - 6
+        else
+            label:Hide()
+        end
+
         local button = choiceButtons[index] or CreateChoiceButton(frame, index)
         button:ClearAllPoints()
-        button:SetPoint("TOP", frame, "TOP", 0, topOffset - ((index - 1) * spacing))
-        button:SetText(choice.label)
+        button:SetSize(CHOICE_BUTTON_WIDTH, CHOICE_BUTTON_HEIGHT)
+        button:SetPoint("TOP", frame, "TOP", 0, y)
         button.configID = choice.configID
         button.specID = choice.specID
         button.raidKey = choice.raidKey
-        if PromptUtils.ConfigureLoadoutSwitchButton(button, choice.specID, choice.configID, function()
-            dismissedRaidKey = choice.raidKey
-            HidePrompt()
-        end) then
+
+        if choice.isActive then
+            button:SetText("Active")
+            button:Disable()
+            button:SetScript("OnClick", nil)
             button:Show()
-            button:Enable()
         else
-            button:Hide()
+            button:SetText(FormatLoadoutButtonText(choice.loadoutLabel))
+            if PromptUtils.ConfigureLoadoutSwitchButton(button, choice.specID, choice.configID, function()
+                dismissedRaidKey = choice.raidKey
+                HidePrompt()
+            end) then
+                button:Enable()
+                button:Show()
+            else
+                button:Disable()
+                button:Show()
+            end
         end
+
+        y = y - CHOICE_BUTTON_HEIGHT - CHOICE_ROW_GAP
     end
 
-    frame:SetHeight(108 + math.max(#choices, 1) * spacing)
+    frame:SetHeight(math.abs(y) + FRAME_BOTTOM_PAD)
     frame.dismissButton:ClearAllPoints()
     frame.dismissButton:SetPoint("BOTTOM", frame, "BOTTOM", 0, 14)
+    PromptUtils.EnsureDismissButtonVisible(frame)
 end
 
 function RaidUI.ShowPrompt(raidKey, raid, choices, options)
@@ -113,6 +293,7 @@ function RaidUI.ShowPrompt(raidKey, raid, choices, options)
     end
 
     if not choices or #choices == 0 then
+        HidePrompt()
         return
     end
 
@@ -127,21 +308,30 @@ function RaidUI.ShowPrompt(raidKey, raid, choices, options)
     if #choices == 1 then
         frame.help:SetText("Switch to your assigned loadout:")
     else
-        frame.help:SetText("Remaining bosses need different loadouts:")
+        frame.help:SetText("Assigned loadouts for this raid:")
     end
     frame.help:Show()
-    frame.isLoading = nil
-    PromptUtils.HidePromptLoadingIndicator(frame)
+    PromptUtils.ResetPromptLoadingState(frame)
     LayoutChoiceButtons(frame, choices)
     frame:Show()
 end
 
-local function BuildChoiceLabel(bossNames, specID, configID)
-    local loadoutLabel = Loadout.FormatLoadoutLabel(specID, Loadout.GetLoadoutName(configID))
-    return table.concat(bossNames, ", ") .. "  \194\187  " .. loadoutLabel
+local function BuildLoadoutChoice(raidKey, specID, configID, bossNames)
+    return {
+        configID = configID,
+        specID = specID,
+        raidKey = raidKey,
+        bossLabel = FormatBossLabel(bossNames),
+        loadoutLabel = Loadout.FormatLoadoutLabel(specID, Loadout.GetLoadoutName(configID)),
+        isActive = Loadout.IsAssignedLoadoutActive(specID, configID),
+    }
 end
 
 local function BuildGroupedPromptChoices(raidKey, raid, bosses)
+    if not bosses or #bosses == 0 then
+        return nil
+    end
+
     local groups = {}
     local order = {}
 
@@ -163,35 +353,57 @@ local function BuildGroupedPromptChoices(raidKey, raid, bosses)
         end
     end
 
-    if #order == 0 then
-        local defaultRef = DB:GetRaidDefaultLoadoutRef()
-        if defaultRef and not Loadout.IsAssignedLoadoutActive(defaultRef.specID, defaultRef.configID) then
-            return {
-                {
-                    configID = defaultRef.configID,
-                    specID = defaultRef.specID,
-                    raidKey = raidKey,
-                    label = BuildChoiceLabel({ raid.name }, defaultRef.specID, defaultRef.configID),
-                },
-            }
+    local defaultRef = DB:GetRaidDefaultLoadoutRef()
+    local defaultBossNames = {}
+    for _, boss in ipairs(bosses) do
+        if not DB:GetRaidBossLoadoutRef(raidKey, boss.key) then
+            defaultBossNames[#defaultBossNames + 1] = boss.name
         end
-        return nil
+    end
+
+    if defaultRef and #defaultBossNames > 0 then
+        local defaultKey = Loadout.EncodeLoadoutKey(defaultRef.specID, defaultRef.configID)
+        local group = groups[defaultKey]
+        if not group then
+            group = {
+                specID = defaultRef.specID,
+                configID = defaultRef.configID,
+                bossNames = {},
+            }
+            groups[defaultKey] = group
+            order[#order + 1] = defaultKey
+        end
+        for _, bossName in ipairs(defaultBossNames) do
+            group.bossNames[#group.bossNames + 1] = bossName
+        end
     end
 
     local choices = {}
-    for _, key in ipairs(order) do
-        local group = groups[key]
-        if not Loadout.IsAssignedLoadoutActive(group.specID, group.configID) then
-            choices[#choices + 1] = {
-                configID = group.configID,
-                specID = group.specID,
-                raidKey = raidKey,
-                label = BuildChoiceLabel(group.bossNames, group.specID, group.configID),
-            }
+
+    if #order == 0 then
+        if not defaultRef then
+            return nil
+        end
+
+        choices[#choices + 1] = BuildLoadoutChoice(
+            raidKey,
+            defaultRef.specID,
+            defaultRef.configID,
+            CollectBossNames(bosses)
+        )
+    else
+        for _, key in ipairs(order) do
+            local group = groups[key]
+            choices[#choices + 1] = BuildLoadoutChoice(
+                raidKey,
+                group.specID,
+                group.configID,
+                group.bossNames
+            )
         end
     end
 
-    if #choices == 0 then
+    if not NeedsPromptForChoices(choices) then
         return nil
     end
 
@@ -212,24 +424,41 @@ local function NormalizeSimRaidKey(key)
     return nil
 end
 
-local function GetPromptBosses(raid, killStates, options)
-    options = options or {}
-    if options.ignoreRequirements then
-        return Raids.GetAliveBosses(raid, killStates)
+local function GetSimulatedKillStates(raid)
+    local states = {}
+
+    for _, boss in ipairs(raid.bosses) do
+        states[boss.key] = simulatedKills[boss.key] or false
     end
-    return Raids.GetAvailableBosses(raid, killStates)
+
+    return states
 end
 
-local function HasPromptableRaidAssignments(raidKey, raid)
-    for _, boss in ipairs(raid.bosses) do
-        local ref = DB:GetRaidBossLoadoutRef(raidKey, boss.key)
-        if ref and not Loadout.IsAssignedLoadoutActive(ref.specID, ref.configID) then
+local function GetPromptBosses(raid, instanceInfo)
+    if instanceInfo and instanceInfo.isSimulation then
+        return Raids.GetAliveBosses(raid, GetSimulatedKillStates(raid))
+    end
+
+    return Raids.GetAliveBossesInInstance(raid, instanceInfo)
+end
+
+local function HasAnyRaidAssignments(raidKey)
+    if DB:GetRaidDefaultLoadoutRef() then
+        return true
+    end
+
+    local assignment = DB:GetRaidAssignmentIfExists(nil, raidKey)
+    if assignment and assignment.bosses then
+        for _ in pairs(assignment.bosses) do
             return true
         end
     end
 
-    local defaultRef = DB:GetRaidDefaultLoadoutRef()
-    return defaultRef and not Loadout.IsAssignedLoadoutActive(defaultRef.specID, defaultRef.configID)
+    return false
+end
+
+local function HasPromptableRaidAssignments(raidKey, raid)
+    return BuildGroupedPromptChoices(raidKey, raid, raid.bosses) ~= nil
 end
 
 local function FindRaidKeyForSimulation(preferredKey)
@@ -243,7 +472,6 @@ local function FindRaidKeyForSimulation(preferredKey)
         return DEFAULT_RAID_SIM_KEY
     end
 
-    local Catalog = LoadoutLocker.RaidCatalog
     for _, raid in ipairs(Catalog.CURRENT_TIER) do
         if HasPromptableRaidAssignments(raid.key, raid) then
             return raid.key
@@ -253,14 +481,6 @@ local function FindRaidKeyForSimulation(preferredKey)
     return DEFAULT_RAID_SIM_KEY
 end
 
-local function BuildSimulatedKillStates(raid)
-    local killStates = {}
-    for _, boss in ipairs(raid.bosses) do
-        killStates[boss.key] = false
-    end
-    return killStates
-end
-
 local function GetSimulatedInstanceInfo(raid)
     return {
         name = raid.name,
@@ -268,14 +488,215 @@ local function GetSimulatedInstanceInfo(raid)
         difficultyID = C.NORMAL_RAID_DIFFICULTY_ID,
         instanceID = raid.instanceIDs and raid.instanceIDs[1],
         numEncounters = #raid.bosses,
+        inInstance = true,
+        isSimulation = true,
     }
 end
 
-function RaidUI.SetSimulatedRaid(raidKey)
-    simulatedRaidKey = raidKey
+local function CreateSimBossRow(parent, index)
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetSize(380, 26)
+    row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.name:SetPoint("LEFT", row, "LEFT", 8, 0)
+    row.name:SetJustifyH("LEFT")
+    row.name:SetWidth(260)
+    row.button = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+    row.button:SetSize(100, 22)
+    row.button:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+    simBossRows[index] = row
+    return row
+end
+
+local function RefreshSimPanel()
+    if not simFrame then
+        return
+    end
+
+    for _, raid in ipairs(Catalog.CURRENT_TIER) do
+        local button = simRaidButtons[raid.key]
+        if button then
+            local label = raid.name
+            if raid.key == simulatedRaidKey then
+                label = label .. " (active)"
+            end
+            button:SetText(label)
+        end
+    end
+
+    local raid = simulatedRaidKey and Raids.GetByKey(simulatedRaidKey)
+    for index = 1, MAX_SIM_BOSSES do
+        local row = simBossRows[index] or CreateSimBossRow(simFrame.bossContainer, index)
+        local boss = raid and raid.bosses[index]
+        if boss then
+            row:ClearAllPoints()
+            row:SetPoint("TOP", simFrame.bossContainer, "TOP", 0, -((index - 1) * 28))
+            row:Show()
+            row.name:SetText(boss.name)
+            if simulatedKills[boss.key] then
+                row.button:SetText("Killed")
+                row.button:Disable()
+                row.button:SetScript("OnClick", nil)
+            else
+                row.button:SetText("Mark killed")
+                row.button:Enable()
+                local bossKey = boss.key
+                row.button:SetScript("OnClick", function()
+                    RaidUI.MarkSimulatedBossKilled(bossKey)
+                end)
+            end
+        else
+            row:Hide()
+        end
+    end
+
+    if not raid then
+        simFrame.status:SetText("Select a raid to simulate.")
+        return
+    end
+
+    if not HasAnyRaidAssignments(simulatedRaidKey) then
+        simFrame.status:SetText("Assign raid loadouts in /locker to test prompts.")
+        return
+    end
+
+    local instanceInfo = GetSimulatedInstanceInfo(raid)
+    local aliveBosses = GetPromptBosses(raid, instanceInfo)
+    if #aliveBosses == 0 then
+        simFrame.status:SetText("All bosses marked killed. No prompt will appear.")
+        return
+    end
+
+    if not BuildGroupedPromptChoices(simulatedRaidKey, raid, aliveBosses) then
+        simFrame.status:SetText("No prompt needed - your active loadout matches all alive bosses.")
+        return
+    end
+
+    simFrame.status:SetText(#aliveBosses .. " boss(es) alive in this simulation.")
+end
+
+local function EnsureSimPanel()
+    if simFrame then
+        return simFrame
+    end
+
+    local raidCount = #Catalog.CURRENT_TIER
+    local frame = Widgets.CreateDialogFrame({
+        name = "LoadoutLockerRaidSim",
+        title = "Raid Simulation",
+        width = 440,
+        height = 148 + (raidCount * 28) + (MAX_SIM_BOSSES * 28),
+        onClose = function()
+            RaidUI.StopSimulation()
+            Print("Raid simulation stopped.")
+        end,
+    })
+
+    frame.help = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    frame.help:SetPoint("TOP", frame.title, "BOTTOM", 0, -10)
+    frame.help:SetWidth(380)
+    frame.help:SetWordWrap(true)
+    frame.help:SetJustifyH("CENTER")
+    frame.help:SetText("Pick a raid, mark bosses killed, and watch the loadout prompt update.")
+
+    local raidTop = -72
+    for index, raid in ipairs(Catalog.CURRENT_TIER) do
+        local button = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+        button:SetSize(380, 24)
+        button:SetPoint("TOP", frame, "TOP", 0, raidTop - ((index - 1) * 28))
+        button:SetText(raid.name)
+        button:SetScript("OnClick", function()
+            RaidUI.SelectSimulatedRaid(raid.key)
+        end)
+        simRaidButtons[raid.key] = button
+    end
+
+    local bossHeaderY = raidTop - (raidCount * 28) - 20
+    frame.bossHeader = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    frame.bossHeader:SetPoint("TOP", frame, "TOP", 0, bossHeaderY)
+    frame.bossHeader:SetText("Bosses")
+
+    frame.bossContainer = CreateFrame("Frame", nil, frame)
+    frame.bossContainer:SetSize(380, MAX_SIM_BOSSES * 28)
+    frame.bossContainer:SetPoint("TOP", frame.bossHeader, "BOTTOM", 0, -8)
+
+    frame.status = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    frame.status:SetPoint("BOTTOM", frame, "BOTTOM", 0, 16)
+    frame.status:SetWidth(380)
+    frame.status:SetWordWrap(true)
+    frame.status:SetJustifyH("CENTER")
+
+    frame:SetScript("OnHide", function()
+        if stoppingSim or not RaidUI.IsSimulatingRaid() then
+            return
+        end
+        RaidUI.StopSimulation()
+    end)
+
+    simFrame = frame
+    return frame
+end
+
+function RaidUI.StopSimulation()
+    if stoppingSim then
+        return
+    end
+
+    stoppingSim = true
+    simulatedRaidKey = nil
+    simulatedKills = {}
     dismissedRaidKey = nil
-    if not raidKey then
-        HidePrompt()
+    lastRaidKey = nil
+    HidePrompt()
+    if simFrame and simFrame:IsShown() then
+        simFrame:Hide()
+    end
+    stoppingSim = false
+end
+
+function RaidUI.SelectSimulatedRaid(raidKey)
+    if not Raids.GetByKey(raidKey) then
+        return
+    end
+
+    simulatedRaidKey = raidKey
+    simulatedKills = {}
+    dismissedRaidKey = nil
+    RefreshSimPanel()
+    RaidUI.Evaluate({ force = true })
+end
+
+function RaidUI.MarkSimulatedBossKilled(bossKey)
+    if not simulatedRaidKey or not bossKey or simulatedKills[bossKey] then
+        return
+    end
+
+    simulatedKills[bossKey] = true
+    dismissedRaidKey = nil
+    RefreshSimPanel()
+    RaidUI.Evaluate({ force = true })
+end
+
+function RaidUI.ShowSimPanel(preferredRaidKey)
+    EnsureSimPanel()
+    RefreshSimPanel()
+
+    if preferredRaidKey then
+        RaidUI.SelectSimulatedRaid(preferredRaidKey)
+    elseif not simulatedRaidKey then
+        RaidUI.SelectSimulatedRaid(FindRaidKeyForSimulation(nil))
+    else
+        RefreshSimPanel()
+        RaidUI.Evaluate({ force = true })
+    end
+
+    simFrame:Show()
+end
+
+function RaidUI.SetSimulatedRaid(raidKey)
+    if raidKey then
+        RaidUI.SelectSimulatedRaid(raidKey)
+    else
+        RaidUI.StopSimulation()
     end
 end
 
@@ -285,9 +706,6 @@ end
 
 function RaidUI.Evaluate(options)
     options = options or {}
-    if promptFrame and promptFrame.isLoading then
-        return
-    end
 
     local usingSimulation = RaidUI.IsSimulatingRaid()
     local instanceInfo = Instance.GetCurrent()
@@ -313,8 +731,18 @@ function RaidUI.Evaluate(options)
         raidKey, raid = Raids.ResolveCurrent(instanceInfo)
     end
 
-    if not raidKey then
+    if not raidKey or not raid then
         HidePrompt()
+        return
+    end
+
+    local bosses = GetPromptBosses(raid, instanceInfo)
+    if #bosses == 0 then
+        HidePrompt()
+        return
+    end
+
+    if promptFrame and promptFrame.isLoading then
         return
     end
 
@@ -324,14 +752,7 @@ function RaidUI.Evaluate(options)
 
     lastRaidKey = raidKey
 
-    local killStates = usingSimulation
-        and BuildSimulatedKillStates(raid)
-        or Raids.GetBossKillStates(raid, instanceInfo)
-    local choices = BuildGroupedPromptChoices(
-        raidKey,
-        raid,
-        GetPromptBosses(raid, killStates, { ignoreRequirements = usingSimulation })
-    )
+    local choices = BuildGroupedPromptChoices(raidKey, raid, bosses)
 
     if not choices or #choices == 0 then
         HidePrompt()
@@ -343,41 +764,36 @@ end
 
 function RaidUI.Simulate(requestedRaidKey)
     if requestedRaidKey == "stop" or requestedRaidKey == "off" then
-        RaidUI.SetSimulatedRaid(nil)
+        RaidUI.StopSimulation()
         Print("Raid simulation stopped.")
         return
     end
 
-    local raidKey = FindRaidKeyForSimulation(requestedRaidKey)
-    local raid = Raids.GetByKey(raidKey)
-    if not raid then
-        Print("No raid data available to simulate.")
+    local raidKey = NormalizeSimRaidKey(requestedRaidKey)
+    if requestedRaidKey and not raidKey then
+        Print("Unknown raid. Use voidspire, dreamrift, march, or sporefall.")
         return
     end
 
-    if not HasPromptableRaidAssignments(raidKey, raid) then
-        Print("Assign a raid loadout in /locker that differs from your current build first.")
-        return
-    end
-
-    RaidUI.SetSimulatedRaid(raidKey)
-    RaidUI.Evaluate({ force = true })
-
-    if not promptFrame or not promptFrame:IsShown() then
-        RaidUI.SetSimulatedRaid(nil)
-        Print("Raid simulation could not build a prompt for " .. raid.name .. ".")
-        return
-    end
-
-    Print("Simulating raid: " .. raid.name .. " (/locker sim raid stop to end).")
+    RaidUI.ShowSimPanel(raidKey)
 end
 
 function RaidUI.AppendDebugLines(lines, instanceInfo, specID)
-    local inRaid = Raids.IsInRaidInstance(instanceInfo)
-    local raidKey, raid = Raids.ResolveCurrent(instanceInfo)
+    local simulating = RaidUI.IsSimulatingRaid()
+    local inRaid = simulating or Raids.IsInRaidInstance(instanceInfo)
+    local raidKey, raid
+
+    if simulating then
+        raidKey = simulatedRaidKey
+        raid = Raids.GetByKey(raidKey)
+        instanceInfo = raid and GetSimulatedInstanceInfo(raid) or instanceInfo
+    else
+        raidKey, raid = Raids.ResolveCurrent(instanceInfo)
+    end
 
     lines[#lines + 1] = ""
     lines[#lines + 1] = "--- Raids ---"
+    lines[#lines + 1] = "simulating: " .. tostring(simulating)
     lines[#lines + 1] = "active: " .. tostring(inRaid)
     lines[#lines + 1] = "resolvedKey: " .. tostring(raidKey)
     lines[#lines + 1] = "resolvedName: " .. tostring(raid and raid.name)
@@ -391,19 +807,15 @@ function RaidUI.AppendDebugLines(lines, instanceInfo, specID)
         return
     end
 
-    local killStates = Raids.GetBossKillStates(raid, instanceInfo)
-    local bosses = GetPromptBosses(raid, killStates)
+    local killStates = simulating and GetSimulatedKillStates(raid) or Raids.GetInstanceBossKillStates(raid, instanceInfo)
+    local bosses = GetPromptBosses(raid, instanceInfo)
     local choices = BuildGroupedPromptChoices(raidKey, raid, bosses)
 
-    lines[#lines + 1] = "savedInstanceMatched: " .. tostring(Raids.HasSavedLockout(instanceInfo))
-    lines[#lines + 1] = "difficultyID: " .. tostring(instanceInfo.difficultyID)
-    lines[#lines + 1] = "killStates:"
-    for _, boss in ipairs(raid.bosses) do
-        lines[#lines + 1] = "  " .. boss.key .. " (enc " .. tostring(boss.encounterIndex) .. "): "
-            .. tostring(killStates[boss.key])
-    end
-
     lines[#lines + 1] = "promptBosses: " .. tostring(#bosses)
+    lines[#lines + 1] = "instanceKills:"
+    for _, boss in ipairs(raid.bosses) do
+        lines[#lines + 1] = "  " .. boss.key .. ": " .. tostring(killStates[boss.key] and "dead" or "alive")
+    end
     lines[#lines + 1] = "choices: " .. tostring(choices and #choices or 0)
 
     if choices then
@@ -421,22 +833,38 @@ function RaidUI.AppendDebugLines(lines, instanceInfo, specID)
     end
 end
 
+local function RequestRaidLockoutRefreshIfNeeded()
+    local instanceInfo = Instance.GetCurrent()
+    if not Raids.IsInRaidInstance(instanceInfo) then
+        return
+    end
+    Raids.RequestLockoutRefresh()
+end
+
 local eventFrame = PromptUtils.RegisterPromptEvents(function(_, event, ...)
     if event == "ENCOUNTER_END" then
-        local _, _, _, _, endStatus = ...
+        local _, encounterName, _, _, endStatus = ...
         if endStatus ~= 1 then
             return
         end
 
+        local instanceInfo = Instance.GetCurrent()
+        local _, raid = Raids.ResolveCurrent(instanceInfo)
+        if raid then
+            local boss = Raids.FindBossByName(raid, encounterName)
+            if boss then
+                Raids.RecordInstanceBossKill(instanceInfo, boss.key)
+            end
+        end
+
         dismissedRaidKey = nil
-        Raids.RequestLockoutRefresh()
         ScheduleEvaluate(1.0)
         return
     end
 
     if event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" or event == "ZONE_CHANGED" then
         if IsInInstance() then
-            Raids.RequestLockoutRefresh()
+            RequestRaidLockoutRefreshIfNeeded()
             ScheduleEvaluate(ENTER_EVALUATE_DELAY)
         else
             ScheduleEvaluate(0.5)
@@ -444,15 +872,19 @@ local eventFrame = PromptUtils.RegisterPromptEvents(function(_, event, ...)
         return
     end
 
-    if event == "UPDATE_INSTANCE_INFO" then
-        ScheduleEvaluate(0.1)
+    if event == "UPDATE_INSTANCE_INFO" or event == "LFG_LOCK_INFO_RECEIVED" then
+        if Raids.IsInRaidInstance(Instance.GetCurrent()) then
+            ScheduleEvaluate(0.5)
+        end
+        return
     end
 end, {
     events = {
         "PLAYER_ENTERING_WORLD",
         "ZONE_CHANGED_NEW_AREA",
         "ZONE_CHANGED",
-        "UPDATE_INSTANCE_INFO",
         "ENCOUNTER_END",
+        "UPDATE_INSTANCE_INFO",
+        "LFG_LOCK_INFO_RECEIVED",
     },
 })

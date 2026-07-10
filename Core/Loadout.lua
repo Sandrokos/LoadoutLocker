@@ -11,6 +11,210 @@ local awaitingTalentSwitchAfterSpec
 local loadoutSelectionHooked
 local lastAppliedSpecID
 local lastUpgradeCheckBySpec = {}
+local talentCommitPending
+local talentCastFrame
+local castCompleteTimer
+local castPollToken
+local talentCommitCompleteHandler
+
+local function IsPlayerCasting()
+    return UnitCastingInfo("player") or UnitChannelInfo("player")
+end
+
+local function FinishTalentCommit()
+    if castCompleteTimer then
+        castCompleteTimer:Cancel()
+        castCompleteTimer = nil
+    end
+
+    local pending = talentCommitPending
+    if not pending then
+        return
+    end
+
+    talentCommitPending = nil
+
+    local specID = Loadout.GetSpecID()
+    local configID = specID and Loadout.GetLoadoutConfigID(specID)
+    if specID ~= pending.specID or configID ~= pending.configID then
+        Loadout.AbortLoadoutSwitch("cancelled")
+        return
+    end
+
+    if talentCommitCompleteHandler then
+        talentCommitCompleteHandler(specID, configID)
+    end
+end
+
+local function ScheduleFinishTalentCommit()
+    if castCompleteTimer then
+        castCompleteTimer:Cancel()
+    end
+
+    castCompleteTimer = C_Timer.NewTimer(C.TALENT_COMMIT_FINISH_DELAY, FinishTalentCommit)
+end
+
+local function OnTalentCastEvent(_, event)
+    if not talentCommitPending then
+        return
+    end
+
+    if event == "UNIT_SPELLCAST_START" or event == "UNIT_SPELLCAST_CHANNEL_START" then
+        talentCommitPending.waitingForCastStart = false
+        talentCommitPending.sawCast = true
+        return
+    end
+
+    if event == "UNIT_SPELLCAST_INTERRUPTED" or event == "UNIT_SPELLCAST_FAILED" then
+        if talentCommitPending and talentCommitPending.sawCast then
+            Loadout.AbortLoadoutSwitch("cancelled")
+        end
+        return
+    end
+
+    if event == "UNIT_SPELLCAST_STOP"
+        or event == "UNIT_SPELLCAST_SUCCEEDED"
+        or event == "UNIT_SPELLCAST_CHANNEL_STOP"
+    then
+        if talentCommitPending.sawCast and not IsPlayerCasting() then
+            ScheduleFinishTalentCommit()
+        end
+    end
+end
+
+local function EnsureTalentCastMonitor()
+    if talentCastFrame then
+        return
+    end
+
+    talentCastFrame = CreateFrame("Frame")
+    talentCastFrame:RegisterUnitEvent("UNIT_SPELLCAST_START", "player")
+    talentCastFrame:RegisterUnitEvent("UNIT_SPELLCAST_STOP", "player")
+    talentCastFrame:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", "player")
+    talentCastFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
+    talentCastFrame:RegisterUnitEvent("UNIT_SPELLCAST_FAILED", "player")
+    talentCastFrame:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", "player")
+    talentCastFrame:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP", "player")
+    talentCastFrame:SetScript("OnEvent", OnTalentCastEvent)
+end
+
+local function PollTalentCastFallback(token)
+    if token ~= castPollToken or not talentCommitPending then
+        return
+    end
+
+    local elapsed = GetTime() - talentCommitPending.startedAt
+
+    if talentCommitPending.waitingForCastStart then
+        if IsPlayerCasting() then
+            talentCommitPending.waitingForCastStart = false
+            talentCommitPending.sawCast = true
+        elseif elapsed >= C.TALENT_COMMIT_CAST_START_TIMEOUT then
+            if IsPlayerCasting() then
+                talentCommitPending.waitingForCastStart = false
+                talentCommitPending.sawCast = true
+            else
+                FinishTalentCommit()
+            end
+            return
+        end
+    elseif talentCommitPending.sawCast and not IsPlayerCasting() and elapsed >= C.TALENT_COMMIT_FINISH_DELAY then
+        ScheduleFinishTalentCommit()
+        return
+    end
+
+    if elapsed >= C.TALENT_COMMIT_CAST_TIMEOUT then
+        FinishTalentCommit()
+        return
+    end
+
+    C_Timer.After(0.1, function()
+        PollTalentCastFallback(token)
+    end)
+end
+
+function Loadout.SetTalentCommitCompleteHandler(handler)
+    talentCommitCompleteHandler = handler
+end
+
+function Loadout.IsTalentCommitInProgress()
+    return talentCommitPending ~= nil
+end
+
+function Loadout.CancelTalentCommit()
+    castPollToken = (castPollToken or 0) + 1
+    talentCommitPending = nil
+    if castCompleteTimer then
+        castCompleteTimer:Cancel()
+        castCompleteTimer = nil
+    end
+end
+
+function Loadout.AbortLoadoutSwitch(reason)
+    reason = reason or "cancelled"
+
+    local PromptUtils = LoadoutLocker.PromptUtils
+    if PromptUtils and PromptUtils.HasPendingPromptSwitch() then
+        PromptUtils.FailPendingPromptSwitch(reason)
+        return
+    end
+
+    Loadout.CancelTalentCommit()
+    Loadout.ClearAwaitingTalentSwitchAfterSpec()
+    Loadout.ClearPendingSwitch()
+
+    local gear = LoadoutLocker.Gear
+    if gear and gear.CancelLoadoutSwitch then
+        gear.CancelLoadoutSwitch()
+    end
+
+    if reason == "cancelled" then
+        LoadoutLocker.Print("Swap cancelled.")
+    elseif PromptUtils and PromptUtils.PrintSwitchFailure then
+        PromptUtils.PrintSwitchFailure(reason)
+    end
+end
+
+function Loadout.NotifyTalentCommitComplete(specID, configID)
+    Loadout.CancelTalentCommit()
+    if talentCommitCompleteHandler then
+        talentCommitCompleteHandler(specID, configID)
+    end
+end
+
+function Loadout.BeginTalentCommit(specID, configID)
+    specID = tonumber(specID)
+    configID = tonumber(configID)
+    if not specID or not configID or Loadout.IsStarterBuild(configID) then
+        return
+    end
+
+    if talentCommitPending
+        and talentCommitPending.specID == specID
+        and talentCommitPending.configID == configID
+    then
+        return
+    end
+
+    talentCommitPending = {
+        specID = specID,
+        configID = configID,
+        waitingForCastStart = true,
+        sawCast = false,
+        startedAt = GetTime(),
+    }
+
+    EnsureTalentCastMonitor()
+
+    C_Timer.After(0.3, function()
+        if not talentCommitPending or talentCommitPending.sawCast then
+            return
+        end
+
+        castPollToken = (castPollToken or 0) + 1
+        PollTalentCastFallback(castPollToken)
+    end)
+end
 
 function Loadout.GetSpecID()
     local specIndex = C_SpecializationInfo.GetSpecialization()
@@ -160,10 +364,14 @@ function Loadout.GetClassSpecList()
     local specs = {}
 
     for _, specID in ipairs(Loadout.CollectKnownSpecIDs()) do
+        local specName
+        if GetSpecializationInfoForSpecID then
+            specName = select(2, GetSpecializationInfoForSpecID(specID))
+        end
         specs[#specs + 1] = {
             specIndex = Loadout.GetSpecIndex(specID),
             specID = specID,
-            name = Loadout.GetSpecName(specID) or ("Spec " .. tostring(specID)),
+            name = specName or ("Spec " .. tostring(specID)),
         }
     end
 
@@ -580,11 +788,7 @@ function Loadout.HookSelection()
         end
 
         pendingLoadoutSwitch = { specID = specID, configID = configID }
-
-        local gear = LoadoutLocker.Gear
-        if gear and gear.ScheduleLoadoutGearApply then
-            gear.ScheduleLoadoutGearApply()
-        end
+        Loadout.BeginTalentCommit(specID, configID)
     end)
 end
 
@@ -647,6 +851,8 @@ function Loadout.SwitchTo(configID, specID)
     else
         pendingLoadoutSwitch = { specID = specID, configID = configID }
     end
+
+    Loadout.BeginTalentCommit(specID, configID)
 
     return true, result
 end

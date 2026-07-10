@@ -13,6 +13,10 @@ Constants.TALENT_UI_ADDON = "Blizzard_PlayerSpells"
 
 Constants.EQUIP_SLOT_DELAY = 0.15
 Constants.LOADOUT_APPLY_DELAY = 0.3
+Constants.DOT_SPINNER_STEP_TIME = 0.12
+Constants.TALENT_COMMIT_FINISH_DELAY = 0.2
+Constants.TALENT_COMMIT_CAST_START_TIMEOUT = 2.0
+Constants.TALENT_COMMIT_CAST_TIMEOUT = 30.0
 Constants.SPEC_TALENT_SWITCH_DELAY = 1.0
 Constants.UI_TITLE_COLOR = { 1, 0.82, 0.35 }
 Constants.EQUIPMENT_SET_PREFIX = ""
@@ -20,6 +24,8 @@ Constants.EQUIPMENT_SET_MAX_NAME = 16
 Constants.SAVE_RETRY_DELAY = 0.15
 Constants.OFFER_ADVANCE_DELAY = 0.05
 Constants.ONBOARDING_LOGIN_DELAY = 1.5
+Constants.PROMPT_LOADING_WIDTH = 320
+Constants.PROMPT_LOADING_HEIGHT = 128
 
 Constants.EQUIP_SLOTS = {
     INVSLOT_HEAD,
@@ -101,6 +107,9 @@ function Constants.GetTertiarySettingLabel(field)
 end
 
 Constants.NORMAL_RAID_DIFFICULTY_ID = 14
+Constants.HEROIC_RAID_DIFFICULTY_ID = 15
+Constants.MYTHIC_RAID_DIFFICULTY_ID = 16
+Constants.LFR_RAID_DIFFICULTY_ID = 17
 
 Constants.DIALOG_BACKDROP = {
     bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
