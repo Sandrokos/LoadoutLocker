@@ -212,12 +212,12 @@ local function NormalizeSimRaidKey(key)
     return nil
 end
 
-local function GetPromptBosses(raid, killStates)
-    local alive = Raids.GetAliveBosses(raid, killStates)
-    if #alive > 0 then
-        return alive
+local function GetPromptBosses(raid, killStates, options)
+    options = options or {}
+    if options.ignoreRequirements then
+        return Raids.GetAliveBosses(raid, killStates)
     end
-    return raid.bosses
+    return Raids.GetAvailableBosses(raid, killStates)
 end
 
 local function HasPromptableRaidAssignments(raidKey, raid)
@@ -330,7 +330,7 @@ function RaidUI.Evaluate(options)
     local choices = BuildGroupedPromptChoices(
         raidKey,
         raid,
-        GetPromptBosses(raid, killStates)
+        GetPromptBosses(raid, killStates, { ignoreRequirements = usingSimulation })
     )
 
     if not choices or #choices == 0 then
@@ -394,6 +394,14 @@ function RaidUI.AppendDebugLines(lines, instanceInfo, specID)
     local killStates = Raids.GetBossKillStates(raid, instanceInfo)
     local bosses = GetPromptBosses(raid, killStates)
     local choices = BuildGroupedPromptChoices(raidKey, raid, bosses)
+
+    lines[#lines + 1] = "savedInstanceMatched: " .. tostring(Raids.HasSavedLockout(instanceInfo))
+    lines[#lines + 1] = "difficultyID: " .. tostring(instanceInfo.difficultyID)
+    lines[#lines + 1] = "killStates:"
+    for _, boss in ipairs(raid.bosses) do
+        lines[#lines + 1] = "  " .. boss.key .. " (enc " .. tostring(boss.encounterIndex) .. "): "
+            .. tostring(killStates[boss.key])
+    end
 
     lines[#lines + 1] = "promptBosses: " .. tostring(#bosses)
     lines[#lines + 1] = "choices: " .. tostring(choices and #choices or 0)

@@ -1215,11 +1215,11 @@ local function RunUpgradeOnlyPipeline(specID, configID, gearSet, options)
     local function afterUpgrades(workingGearSet, changed)
         if changed then
             SaveEquippedGearSet(specID, configID, workingGearSet)
+            finish(true, true)
+            return
         end
 
-        ValidateEquippedGear(workingGearSet, function(valid)
-            finish(valid, changed)
-        end)
+        finish(true, false)
     end
 
     Gear.NormalizeGearSetKeys(gearSet)
@@ -1252,9 +1252,7 @@ local function RunLoadoutGearPipeline(specID, configID, gearSet, options)
             SaveEquippedGearSet(specID, configID, workingGearSet)
         end
 
-        ValidateEquippedGear(workingGearSet, function(valid)
-            afterValidation(valid, workingGearSet, changed)
-        end)
+        afterValidation(true, workingGearSet, changed)
     end
 
     Gear.NormalizeGearSetKeys(gearSet)
@@ -1299,7 +1297,16 @@ local function RunLoadoutGearPipeline(specID, configID, gearSet, options)
         end)
 
         WaitForEquipmentSetSwap(function()
-            afterEquipmentSet()
+            ValidateEquippedGear(gearSet, function(valid)
+                if not valid then
+                    if options.onApplyFailed then
+                        options.onApplyFailed()
+                    end
+                    return
+                end
+
+                afterEquipmentSet()
+            end)
         end)
         return
     end

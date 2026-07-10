@@ -158,24 +158,29 @@ function Raids.GetBossKillStates(raid, instanceInfo)
         return states
     end
 
-    local savedIndex, savedEncounters = FindSavedInstance(instanceInfo.instanceID, instanceInfo.difficultyID)
-    local encounterCount = savedEncounters or instanceInfo.numEncounters or #raid.bosses
-
+    local savedIndex = FindSavedInstance(instanceInfo.instanceID, instanceInfo.difficultyID)
     if not savedIndex then
         return states
     end
 
-    for encounterIndex = 1, encounterCount do
-        local bossName, _, isKilled = GetSavedInstanceEncounterInfo(savedIndex, encounterIndex)
-        if bossName and isKilled then
-            local boss = Raids.FindBossByName(raid, bossName)
-            if boss then
+    for _, boss in ipairs(raid.bosses) do
+        local encounterIndex = boss.encounterIndex
+        if encounterIndex then
+            local _, _, isKilled = GetSavedInstanceEncounterInfo(savedIndex, encounterIndex)
+            if isKilled then
                 states[boss.key] = true
             end
         end
     end
 
     return states
+end
+
+function Raids.HasSavedLockout(instanceInfo)
+    if not instanceInfo or not instanceInfo.instanceID or not instanceInfo.difficultyID then
+        return false
+    end
+    return FindSavedInstance(instanceInfo.instanceID, instanceInfo.difficultyID) ~= nil
 end
 
 function Raids.GetAliveBosses(raid, killStates)
