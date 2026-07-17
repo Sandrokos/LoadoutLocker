@@ -1483,6 +1483,8 @@ function Gear.ApplyGearForLoadoutChange()
     local shouldRunUpgrades = Loadout.ShouldRunUpgradeCheck(specID, configID)
 
     if not shouldApplyGear and not shouldRunUpgrades then
+        Loadout.RememberActive(specID, configID)
+        Loadout.ConsumePendingSwitch()
         PromptUtils.NotifyPromptGearStepFinished(specID, configID)
         return
     end
@@ -1491,6 +1493,7 @@ function Gear.ApplyGearForLoadoutChange()
 
     local gearSet = DB:GetGearSet(specID, configID)
     if not gearSet then
+        Loadout.RememberActive(specID, configID)
         Loadout.RememberAppliedSpec(specID)
         Loadout.RememberUpgradeCheck(specID, configID)
         PromptUtils.NotifyPromptGearStepFinished(specID, configID)
@@ -1500,7 +1503,6 @@ function Gear.ApplyGearForLoadoutChange()
     gearSet = DB:CopyGearSet(gearSet)
 
     local applyOptions = {
-        appliedMessage = "Applied saved gear set.",
         upgradedMessage = "Applied and saved upgraded gear set.",
         onApplied = function()
             Loadout.RememberActive(specID, configID)
@@ -1514,6 +1516,10 @@ function Gear.ApplyGearForLoadoutChange()
             PromptUtils.NotifyPromptGearStepFinished(specID, configID)
         end,
     }
+    -- Only announce gear apply on real loadout/spec switches, not upgrade-only passes.
+    if shouldApplyGear then
+        applyOptions.appliedMessage = "Applied saved gear set."
+    end
     if shouldRunUpgrades or DB:AreUpgradeChecksEnabled() then
         applyOptions.forceUpgradeCheck = true
     end

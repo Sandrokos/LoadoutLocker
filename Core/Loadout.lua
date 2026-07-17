@@ -787,6 +787,18 @@ function Loadout.HookSelection()
             return
         end
 
+        -- Opening the talent panel re-selects the current loadout without a real swap.
+        local previousConfigID = Loadout.GetPreviousConfigID(specID)
+        if previousConfigID == nil then
+            Loadout.RememberActive(specID, configID)
+            Loadout.RememberAppliedSpec(specID)
+            Loadout.RememberUpgradeCheck(specID, configID)
+            return
+        end
+        if previousConfigID == configID then
+            return
+        end
+
         pendingLoadoutSwitch = { specID = specID, configID = configID }
         Loadout.BeginTalentCommit(specID, configID)
     end)
@@ -798,6 +810,7 @@ function Loadout.RecordCurrent()
     if specID and configID then
         Loadout.RememberActive(specID, configID)
         Loadout.RememberAppliedSpec(specID)
+        Loadout.RememberUpgradeCheck(specID, configID)
         return true
     end
 end
