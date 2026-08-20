@@ -12,9 +12,9 @@ local Dungeons = LoadoutLocker.Dungeons
 local Raids = LoadoutLocker.Raids
 local Delves = LoadoutLocker.Delves
 local PvP = LoadoutLocker.PvP
-local subTabBuildToken = { dungeons = 0, delves = 0 }
-local subTabButtons = { dungeons = {}, delves = {} }
-local selectedSubTabSectionKey = { dungeons = nil, delves = nil }
+local subTabBuildToken = { dungeons = 0, delves = 0, raids = 0 }
+local subTabButtons = { dungeons = {}, delves = {}, raids = {} }
+local selectedSubTabSectionKey = { dungeons = nil, delves = nil, raids = nil }
 local HELP_TEXT = "Equip gear, select a talent loadout, then save with the talent panel button or "
     .. Text.FormatCommand("save") .. ". Changing loadouts automatically equips the saved gear set.\n\n"
     .. Text.FormatHighlight("Commands") .. "\n"
@@ -30,7 +30,7 @@ local TAB_INTRO = {
     priority = "When upgrade prompts appear, higher stats at the top break ties between same item level and track.",
     loadouts = "Review talent loadouts across all specializations, manage saved gear sets, ignored upgrade slots, and copying between loadouts.",
     dungeons = "Set a default talent loadout and optional per-dungeon overrides from saved loadouts (Spec-Talent name). Use the category buttons above to browse season and expansion dungeons.",
-    raids = "Set a default raid loadout and optional per-boss overrides from saved loadouts. In-game prompts appear when you enter a raid and after boss kills.",
+    raids = "Set a default raid loadout and optional per-boss overrides from saved loadouts. Use the season buttons above to browse Season 2 and Season 1 raids. In-game prompts appear when you enter a raid and after boss kills.",
     delves = "Set a default delve loadout and optional per-delve overrides from saved loadouts. Use the Midnight or TWW buttons above to browse delves.",
     pvp = "Set a default PvP loadout and optional overrides for arenas and battlegrounds from saved loadouts.",
 }
@@ -581,46 +581,81 @@ end
 local function BuildDungeonsTab(content)
     BuildSubTabAssignmentsTab(content, SUB_TAB_CONFIG.dungeons)
 end
+local function BuildRaidSeasonList(scrollChild, section, overrideList)
+    Shell:ClearScroll(scrollChild)
+    local builder = Widgets.NewBuilder(scrollChild)
+    if not section then
+        Widgets.FinishBuilder(builder)
+        return
+    end
+
+    Widgets.AddHeading(builder, section.header)
+    for raidIndex, raid in ipairs(section.raids) do
+        local raidAssignment = DB:GetRaidAssignmentIfExists(nil, raid.key)
+        if raidIndex > 1 then
+            Widgets.AddSeparator(builder)
+            Widgets.AddGap(builder, 6)
+        end
+        Widgets.AddHeading(builder, raid.name)
+        for _, boss in ipairs(raid.bosses) do
+            AddContentAssignmentRow(
+                builder,
+                overrideList,
+                boss.name,
+                function()
+                    return raidAssignment and raidAssignment.bosses[boss.key]
+                end,
+                function()
+                    DB:ClearRaidBossConfigID(nil, raid.key, boss.key)
+                end,
+                function(key)
+                    DB:SetRaidBossConfigID(nil, raid.key, boss.key, key)
+                end
+            )
+        end
+    end
+    Widgets.FinishBuilder(builder)
+end
+local function SelectRaidSection(content, section, overrideList)
+    subTabBuildToken.raids = subTabBuildToken.raids + 1
+    for _, button in ipairs(subTabButtons.raids) do
+        button:SetSelected(button.sectionKey == section.key)
+    end
+    selectedSubTabSectionKey.raids = section.key
+    BuildRaidSeasonList(content.scrollChild, section, overrideList)
+end
 local function BuildRaidsTab(content)
-    Shell:ClearScroll(content.scrollChild)
-    local builder = Widgets.NewBuilder(content.scrollChild)
-    Widgets.AddTabIntro(builder, TAB_INTRO.raids)
-    Widgets.AddLabel(builder, "Default raid loadout")
-    AddDefaultLoadoutDropdown(builder, function()
+    Shell:ClearFrame(content.subBar)
+    Shell:ClearFrame(content.header)
+    local overrideList = BuildContentAssignmentDropdownList({ includeUseDefault = true })
+    local sections = Raids.GetMenuSections()
+    LayoutSubTabButtons(content.subBar, sections, 1, subTabButtons.raids, function(section)
+        SelectRaidSection(content, section, overrideList)
+    end)
+    local headerBuilder = Widgets.NewBuilder(content.header)
+    Widgets.AddLabel(headerBuilder, TAB_INTRO.raids)
+    Widgets.AddLabel(headerBuilder, "Default raid loadout")
+    AddDefaultLoadoutDropdown(headerBuilder, function()
         return DB:GetRaidDefaultLoadoutRef()
     end, function(value)
         DB:SetRaidDefaultConfigID(nil, value)
     end)
-    Widgets.AddGap(builder, 10)
-    local overrideList = BuildContentAssignmentDropdownList({ includeUseDefault = true })
-    for _, section in ipairs(Raids.GetMenuSections()) do
-        Widgets.AddHeading(builder, section.header)
-        for raidIndex, raid in ipairs(section.raids) do
-            local raidAssignment = DB:GetRaidAssignmentIfExists(nil, raid.key)
-            if raidIndex > 1 then
-                Widgets.AddSeparator(builder)
-                Widgets.AddGap(builder, 6)
-            end
-            Widgets.AddHeading(builder, raid.name)
-            for _, boss in ipairs(raid.bosses) do
-                AddContentAssignmentRow(
-                    builder,
-                    overrideList,
-                    boss.name,
-                    function()
-                        return raidAssignment and raidAssignment.bosses[boss.key]
-                    end,
-                    function()
-                        DB:ClearRaidBossConfigID(nil, raid.key, boss.key)
-                    end,
-                    function(key)
-                        DB:SetRaidBossConfigID(nil, raid.key, boss.key, key)
-                    end
-                )
+    Widgets.FinishBuilder(headerBuilder)
+    content.header:SetHeight(math.max(headerBuilder.y + 8, 1))
+    Shell:LayoutSubTabContent(content, 1)
+    local activeSection = sections[1]
+    local selectedKey = selectedSubTabSectionKey.raids
+    if selectedKey then
+        for _, section in ipairs(sections) do
+            if section.key == selectedKey then
+                activeSection = section
+                break
             end
         end
     end
-    Widgets.FinishBuilder(builder)
+    if activeSection then
+        SelectRaidSection(content, activeSection, overrideList)
+    end
 end
 local function BuildContentAssignmentsTab(builder, intro, getDefaultLoadoutRef, setDefaultLoadoutRef, getSections, getOverride, clearLoadoutRef, setLoadoutRef, collectionKey)
     Widgets.AddTabIntro(builder, intro)
@@ -690,7 +725,8 @@ local TAB_BUILDERS = {
 local function OnTabSelected(content, tabID)
     subTabBuildToken.dungeons = subTabBuildToken.dungeons + 1
     subTabBuildToken.delves = subTabBuildToken.delves + 1
-    if tabID == "dungeons" or tabID == "delves" then
+    subTabBuildToken.raids = subTabBuildToken.raids + 1
+    if tabID == "dungeons" or tabID == "delves" or tabID == "raids" then
         Shell:EnsureSubTabContent(content)
     else
         Shell:EnsurePlainContent(content)

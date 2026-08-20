@@ -45,6 +45,9 @@ Catalog.MIDNIGHT_DELVES = {
     D("torments_rise", "Torment's Rise", { 2966 }, { "Torment's Rise", "Torments Rise" }),
     D("shadowguard_point", "Shadowguard Point", { 2979 }, { "Shadowguard Point" }),
     D("the_darkway", "The Darkway", { 3003 }, { "The Darkway", "Darkway" }),
+    D("ring_of_glory", "The Ring of Glory", {}, { "Ring of Glory" }),
+    D("gnarldor_isle", "Gnarldor Isle", {}, { "Gnarldor" }),
+    D("venomfall_deeps", "Venomfall Deeps", {}, { "Venomfall", "Deeps" }),
 }
 
 function Catalog.GetAllDelves()

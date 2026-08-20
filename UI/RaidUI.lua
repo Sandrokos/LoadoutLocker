@@ -37,13 +37,21 @@ local CHOICE_TOP_OFFSET = -72
 local CHOICE_ROW_GAP = 14
 local FRAME_BOTTOM_PAD = 50
 
-local DEFAULT_RAID_SIM_KEY = "march_on_quel_danas"
+local DEFAULT_RAID_SIM_KEY = "venomous_abyss"
 
 local RAID_SIM_ALIASES = {
-    march = DEFAULT_RAID_SIM_KEY,
-    quel = DEFAULT_RAID_SIM_KEY,
-    ["quel'danas"] = DEFAULT_RAID_SIM_KEY,
-    ["quel danas"] = DEFAULT_RAID_SIM_KEY,
+    abyss = DEFAULT_RAID_SIM_KEY,
+    venomous = DEFAULT_RAID_SIM_KEY,
+    venom = DEFAULT_RAID_SIM_KEY,
+    ulatek = DEFAULT_RAID_SIM_KEY,
+    ["ula'tek"] = DEFAULT_RAID_SIM_KEY,
+    grotto = "tidebound_grotto",
+    tidebound = "tidebound_grotto",
+    nymrissa = "tidebound_grotto",
+    march = "march_on_quel_danas",
+    quel = "march_on_quel_danas",
+    ["quel'danas"] = "march_on_quel_danas",
+    ["quel danas"] = "march_on_quel_danas",
     rotmire = "sporefall",
     voidspire = "voidspire",
     void = "voidspire",
@@ -472,7 +480,7 @@ local function FindRaidKeyForSimulation(preferredKey)
         return DEFAULT_RAID_SIM_KEY
     end
 
-    for _, raid in ipairs(Catalog.CURRENT_TIER) do
+    for _, raid in ipairs(Catalog.SEASON_TWO) do
         if HasPromptableRaidAssignments(raid.key, raid) then
             return raid.key
         end
@@ -512,7 +520,7 @@ local function RefreshSimPanel()
         return
     end
 
-    for _, raid in ipairs(Catalog.CURRENT_TIER) do
+    for _, raid in ipairs(Catalog.SEASON_TWO) do
         local button = simRaidButtons[raid.key]
         if button then
             local label = raid.name
@@ -579,7 +587,7 @@ local function EnsureSimPanel()
         return simFrame
     end
 
-    local raidCount = #Catalog.CURRENT_TIER
+    local raidCount = #Catalog.SEASON_TWO
     local frame = Widgets.CreateDialogFrame({
         name = "LoadoutLockerRaidSim",
         title = "Raid Simulation",
@@ -599,7 +607,7 @@ local function EnsureSimPanel()
     frame.help:SetText("Pick a raid, mark bosses killed, and watch the loadout prompt update.")
 
     local raidTop = -72
-    for index, raid in ipairs(Catalog.CURRENT_TIER) do
+    for index, raid in ipairs(Catalog.SEASON_TWO) do
         local button = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
         button:SetSize(380, 24)
         button:SetPoint("TOP", frame, "TOP", 0, raidTop - ((index - 1) * 28))
@@ -771,7 +779,7 @@ function RaidUI.Simulate(requestedRaidKey)
 
     local raidKey = NormalizeSimRaidKey(requestedRaidKey)
     if requestedRaidKey and not raidKey then
-        Print("Unknown raid. Use voidspire, dreamrift, march, or sporefall.")
+        Print("Unknown raid. Use abyss, grotto, venomous, or tidebound.")
         return
     end
 

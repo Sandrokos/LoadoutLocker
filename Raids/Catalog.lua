@@ -69,9 +69,41 @@ Catalog.SPOREFALL = R(
     }
 )
 
-Catalog.CURRENT_TIER = {
+Catalog.VENOMOUS_ABYSS = R(
+    "venomous_abyss",
+    "The Venomous Abyss",
+    {},
+    { "Venomous Abyss", "Venomous" },
+    {
+        B("nekzali", "Nek'zali the Soulcoiler", 1, { "Nek'zali", "Nekzali", "Soulcoiler" }),
+        B("entombed_sentinels", "Entombed Sentinels", 2, { "Entombed Sentinels", "Sentinels" }, { "nekzali" }),
+        B("lost_explorers", "The Lost Explorers", 3, { "Lost Explorers", "Explorers" }, { "nekzali" }),
+        B("vashnik", "Vashnik the Malignant", 4, { "Vashnik" }, { "entombed_sentinels" }),
+        B("sszorak", "Sszorak", 5, { "Sszorak" }, { "lost_explorers" }),
+        B("twin_fangs", "The Twin Fangs", 6, { "Twin Fangs", "Vexhul", "Ithraz" }, { "vashnik", "sszorak" }),
+        B("coiled_altar", "The Coiled Altar", 7, { "Coiled Altar" }, { "twin_fangs" }),
+        B("ulatek", "Ula'tek", 8, { "Ula'tek", "Ulatek" }, { "coiled_altar" }),
+    }
+)
+
+Catalog.TIDEBOUND_GROTTO = R(
+    "tidebound_grotto",
+    "Tidebound Grotto",
+    {},
+    { "Tidebound", "Grotto" },
+    {
+        B("nymrissa", "Nymrissa Wavecaller", 1, { "Nymrissa", "Wavecaller" }),
+    }
+)
+
+Catalog.SEASON_ONE = {
     Catalog.VOIDSPIRE,
     Catalog.DREAMRIFT,
     Catalog.MARCH_ON_QUEL_DANAS,
     Catalog.SPOREFALL,
+}
+
+Catalog.SEASON_TWO = {
+    Catalog.VENOMOUS_ABYSS,
+    Catalog.TIDEBOUND_GROTTO,
 }

@@ -36,7 +36,11 @@ local function RegisterRaid(raid)
     end
 end
 
-for _, raid in ipairs(Catalog.CURRENT_TIER) do
+for _, raid in ipairs(Catalog.SEASON_ONE) do
+    RegisterRaid(raid)
+end
+
+for _, raid in ipairs(Catalog.SEASON_TWO) do
     RegisterRaid(raid)
 end
 
@@ -47,8 +51,16 @@ end
 function Raids.GetMenuSections()
     return {
         {
+            key = "season2",
+            tabText = "Season 2",
+            header = RaidConstants.SEASON_TWO_HEADER,
+            raids = Catalog.SEASON_TWO,
+        },
+        {
+            key = "season1",
+            tabText = "Season 1",
             header = RaidConstants.SEASON_ONE_HEADER,
-            raids = Catalog.CURRENT_TIER,
+            raids = Catalog.SEASON_ONE,
         },
     }
 end
