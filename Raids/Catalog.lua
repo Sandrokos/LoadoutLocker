@@ -90,7 +90,7 @@ Catalog.TIDEBOUND_GROTTO = R(
     "tidebound_grotto",
     "Tidebound Grotto",
     {},
-    { "Tidebound", "Grotto" },
+    { "Tidebound Grotto", "Tidebound" },
     {
         B("nymrissa", "Nymrissa Wavecaller", 1, { "Nymrissa", "Wavecaller" }),
     }

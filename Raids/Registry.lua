@@ -103,6 +103,12 @@ end
 
 function Raids.IsInRaidInstance(instanceInfo)
     instanceInfo = instanceInfo or Instance.GetCurrent()
+    -- 5-man dungeons are never raids. Subzones like "The Galvanized Grotto"
+    -- in Temple of Sethraliss must not trigger Tidebound Grotto prompts.
+    if instanceInfo.instanceType == "party" then
+        return false
+    end
+
     if instanceInfo.instanceType == "raid" then
         return true
     end
@@ -116,6 +122,10 @@ end
 
 function Raids.ResolveCurrent(instanceInfo)
     instanceInfo = instanceInfo or Instance.GetCurrent()
+    if instanceInfo.instanceType == "party" then
+        return
+    end
+
     local key, entity, name = Instance.Resolve(instanceInfo, "raid", byKey, byInstanceID)
     if key then
         return key, entity, name
