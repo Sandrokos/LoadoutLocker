@@ -66,6 +66,10 @@ local function CopyLoadoutRef(ref)
     }
 end
 
+local function ResolveStoredLoadoutRef(override, defaultRef)
+    return LoadoutLocker.Loadout.ResolveAssignableRef(override, defaultRef)
+end
+
 local function EnsureGlobalAssignmentStore(storeKey, collectionKey)
     LoadoutLockerDB[storeKey] = LoadoutLockerDB[storeKey] or {}
     local store = LoadoutLockerDB[storeKey]
@@ -202,12 +206,10 @@ local function GetContentLoadoutRef(storeKey, collectionKey, itemKey)
         return nil
     end
 
-    local override = store[collectionKey] and store[collectionKey][itemKey]
-    if override then
-        return NormalizeLoadoutRef(override)
-    end
-
-    return store and NormalizeLoadoutRef(store.defaultLoadout)
+    return ResolveStoredLoadoutRef(
+        NormalizeLoadoutRef(store[collectionKey] and store[collectionKey][itemKey]),
+        NormalizeLoadoutRef(store.defaultLoadout)
+    )
 end
 
 local function SetContentLoadoutRef(storeKey, collectionKey, itemKey, specID, configID, expandKeys)
@@ -387,11 +389,10 @@ function DB:GetRaidBossLoadoutRef(raidKey, bossKey)
 
     local raidAssignment = store.raids and store.raids[raidKey]
     local override = raidAssignment and raidAssignment.bosses and raidAssignment.bosses[bossKey]
-    if override then
-        return NormalizeLoadoutRef(override)
-    end
-
-    return self:GetRaidDefaultLoadoutRef()
+    return ResolveStoredLoadoutRef(
+        NormalizeLoadoutRef(override),
+        self:GetRaidDefaultLoadoutRef()
+    )
 end
 
 function DB:SetRaidBossLoadoutRef(raidKey, bossKey, specID, configID)

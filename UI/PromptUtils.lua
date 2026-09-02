@@ -331,9 +331,6 @@ function PromptUtils.ShowPromptLoading(frame)
     if frame.help then
         frame.help:Hide()
     end
-    if frame.raidName then
-        frame.raidName:Hide()
-    end
     frame.isLoading = true
     ShowLoadingOverlay(frame, nil, true)
 end
@@ -572,7 +569,7 @@ function PromptUtils.CreatePromptFrame(options)
     frame:Hide()
     frame:SetBackdrop(C.DIALOG_BACKDROP)
     frame.title = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    frame.title:SetPoint("TOP", frame, "TOP", 0, -14)
+    frame.title:SetPoint("TOP", frame, "TOP", 0, options.titleOffsetY or -20)
     frame.title:SetText(options.title or "")
     frame.dismissButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     frame.dismissButton:SetSize(100, 22)

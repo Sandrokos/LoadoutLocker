@@ -223,25 +223,6 @@ function Loadout.GetSpecID()
     end
 end
 
-function Loadout.GetSpecName(specID)
-    if not specID then
-        return nil
-    end
-
-    if GetSpecializationInfoForSpecID then
-        local _, name = GetSpecializationInfoForSpecID(specID)
-        if name and name ~= "" then
-            return name
-        end
-    end
-
-    for _, spec in ipairs(Loadout.GetClassSpecList()) do
-        if spec.specID == specID then
-            return spec.name
-        end
-    end
-end
-
 function Loadout.GetPlayerClassID()
     local _, _, classID = UnitClass("player")
     return classID
@@ -321,6 +302,31 @@ local function ForEachClassSpec(callback)
     end
 end
 
+function Loadout.GetSpecName(specID)
+    if not specID then
+        return nil
+    end
+
+    specID = tonumber(specID)
+    local specName
+    ForEachClassSpec(function(_, id, name)
+        if id == specID and name and name ~= "" then
+            specName = name
+            return true
+        end
+    end)
+    if specName then
+        return specName
+    end
+
+    if GetSpecializationInfoForSpecID then
+        local _, name = GetSpecializationInfoForSpecID(specID)
+        if name and name ~= "" then
+            return name
+        end
+    end
+end
+
 local function CollectSpecIDsFromClassAPI(seen, specIDs)
     ForEachClassSpec(function(_, specID)
         AddUniqueSpecID(seen, specIDs, specID)
@@ -362,10 +368,17 @@ end
 
 function Loadout.GetClassSpecList()
     local specs = {}
+    local namesBySpecID = {}
+
+    ForEachClassSpec(function(_, specID, name)
+        if name and name ~= "" then
+            namesBySpecID[specID] = name
+        end
+    end)
 
     for _, specID in ipairs(Loadout.CollectKnownSpecIDs()) do
-        local specName
-        if GetSpecializationInfoForSpecID then
+        local specName = namesBySpecID[specID]
+        if (not specName or specName == "") and GetSpecializationInfoForSpecID then
             specName = select(2, GetSpecializationInfoForSpecID(specID))
         end
         specs[#specs + 1] = {
@@ -449,10 +462,51 @@ local function SortLoadoutListBySpecAndName(list)
     end)
 end
 
-function Loadout.FormatLoadoutLabel(specID, loadoutName)
-    local specName = Loadout.GetSpecName(specID) or "Spec"
-    local name = loadoutName or "Loadout"
-    return specName .. "-" .. name
+local function IsGenericLoadoutName(name, configID)
+    if not name or name == "" or name == "Loadout" then
+        return true
+    end
+
+    if configID and name == "Loadout " .. tostring(configID) then
+        return true
+    end
+
+    return false
+end
+
+function Loadout.FormatLoadoutLabel(specID, loadoutName, configID)
+    local specName = Loadout.GetSpecName(specID)
+    if IsGenericLoadoutName(loadoutName, configID) then
+        loadoutName = nil
+    end
+
+    if specName and specName ~= "" and loadoutName then
+        return specName .. "-" .. loadoutName
+    end
+
+    return specName or loadoutName or "Loadout"
+end
+
+local function HasSavedGear(specID, configID)
+    specID = tonumber(specID)
+    configID = tonumber(configID)
+    return specID and configID and DB:GetEntry(specID, configID) ~= nil
+end
+
+function Loadout.ResolveAssignableRef(overrideRef, defaultRef)
+    if HasSavedGear(overrideRef and overrideRef.specID, overrideRef and overrideRef.configID) then
+        return overrideRef
+    end
+    if HasSavedGear(defaultRef and defaultRef.specID, defaultRef and defaultRef.configID) then
+        return defaultRef
+    end
+    return overrideRef or defaultRef
+end
+
+function Loadout.GetAssignedLoadoutLabel(specID, configID)
+    local entry = DB:GetEntry(specID, configID)
+    local cachedName = entry and entry.loadoutName
+    return Loadout.FormatLoadoutLabel(specID, Loadout.ResolveLoadoutName(configID, cachedName), configID)
 end
 
 local cachedAllConfigList
