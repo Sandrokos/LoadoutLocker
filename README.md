@@ -2,11 +2,11 @@
 
 Save your equipped gear to each talent loadout and automatically swap when you switch builds. Assign loadouts to dungeons, raids, delves, and PvP content and get prompted when it is time to switch — including loadouts from other specializations.
 
-Built for **World of Warcraft: Midnight** (Interface `120007`, `120100`). Current version: **1.14.1**.
+Built for **World of Warcraft: Midnight** (Interface `120007`, `120100`). Current version: **2.0.0**.
 
 ## Features
 
-- **Per-loadout gear sets** — each saved talent loadout can have its own gear snapshot
+- **Shared gear sets** — talent loadouts can reference the same gear set; updating it updates every linked loadout, or you can save as a new set.
 - **Auto-equip on loadout change** — switching loadouts applies the linked gear set after talents commit
 - **Cross-spec loadouts** — content assignments can target any specialization and talent loadout on your class; prompts handle spec, talent, and gear changes in order
 - **Smart swapping** — two-phase unequip/equip handles embellished items and slot conflicts

@@ -117,7 +117,9 @@ function EquipmentSet.GetLoadoutsUsingSetName(specID, setName, excludeConfigID)
     end
 
     for configID, entry in pairs(specData) do
-        if entry.gear and entry.equipmentSetName == setName and configID ~= excludeConfigID then
+        if type(configID) == "number" and configID ~= excludeConfigID
+            and DB:HasGearSet(specID, configID)
+            and DB:GetEquipmentSetName(specID, configID) == setName then
             matches[#matches + 1] = {
                 configID = configID,
                 entry = entry,
@@ -130,9 +132,9 @@ function EquipmentSet.GetLoadoutsUsingSetName(specID, setName, excludeConfigID)
     return matches
 end
 
-function EquipmentSet.AssignSetNameToLoadouts(setName, loadouts)
+function EquipmentSet.AssignSetNameToLoadouts(specID, setName, loadouts)
     for _, loadout in ipairs(loadouts) do
-        loadout.entry.equipmentSetName = setName
+        DB:SetEquipmentSetName(specID, loadout.configID, setName)
     end
 end
 
@@ -208,22 +210,19 @@ function EquipmentSet.EnsureSet(setName, specID)
 end
 
 function EquipmentSet.LinkCopiedLoadouts(specID, sourceConfigID, targetConfigID)
-    local sourceEntry = DB:GetEntry(specID, sourceConfigID)
-    local targetEntry = DB:GetEntry(specID, targetConfigID)
-    if not sourceEntry or not targetEntry then
+    if not DB:GetEntry(specID, sourceConfigID) or not DB:GetEntry(specID, targetConfigID) then
         return
     end
 
-    local setName = sourceEntry.equipmentSetName
+    local setName = DB:GetEquipmentSetName(specID, sourceConfigID)
     if not setName then
+        local sourceEntry = DB:GetEntry(specID, sourceConfigID)
         setName = EquipmentSet.BuildSetName(
             Loadout.ResolveLoadoutName(sourceConfigID, sourceEntry.loadoutName),
             sourceConfigID
         )
-        sourceEntry.equipmentSetName = setName
+        DB:SetEquipmentSetName(specID, sourceConfigID, setName)
     end
-
-    targetEntry.equipmentSetName = setName
 end
 
 function EquipmentSet.OnGearSetDeleted(specID, configID, entry)
@@ -249,7 +248,7 @@ function EquipmentSet.OnGearSetDeleted(specID, configID, entry)
         return
     end
 
-    EquipmentSet.AssignSetNameToLoadouts(newName, remaining)
+    EquipmentSet.AssignSetNameToLoadouts(specID, newName, remaining)
 end
 
 function EquipmentSet.SyncForLoadout(specID, configID, loadoutName)
@@ -267,17 +266,17 @@ function EquipmentSet.SyncForLoadout(specID, configID, loadoutName)
         return false
     end
 
-    local setName = entry.equipmentSetName
+    local setName = DB:GetEquipmentSetName(specID, configID)
     if not setName then
         setName = EquipmentSet.BuildSetName(loadoutName, configID)
-        entry.equipmentSetName = setName
+        DB:SetEquipmentSetName(specID, configID, setName)
     else
         local desiredName = EquipmentSet.BuildSetName(loadoutName, configID)
         local sharedWith = EquipmentSet.GetLoadoutsUsingSetName(specID, setName, configID)
         if #sharedWith == 0 and setName ~= desiredName then
             if EquipmentSet.RenameSet(setName, desiredName, GetSpecIcon(specID)) then
                 setName = desiredName
-                entry.equipmentSetName = desiredName
+                DB:SetEquipmentSetName(specID, configID, desiredName)
             end
         end
     end
@@ -295,7 +294,7 @@ function EquipmentSet.SyncForLoadout(specID, configID, loadoutName)
     else
         api.SaveEquipmentSet(setID)
     end
-    entry.equipmentSetName = setName
+    DB:SetEquipmentSetName(specID, configID, setName)
     return true
 end
 
@@ -327,8 +326,8 @@ function EquipmentSet.TryUse(specID, configID)
         return false
     end
 
-    local entry = DB:GetEntry(specID, configID)
-    if not entry or not entry.equipmentSetName then
+    local setName = DB:GetEquipmentSetName(specID, configID)
+    if not setName then
         return false
     end
 
@@ -337,7 +336,7 @@ function EquipmentSet.TryUse(specID, configID)
         return false
     end
 
-    local setID = EquipmentSet.GetSetID(entry.equipmentSetName)
+    local setID = EquipmentSet.GetSetID(setName)
     if not setID then
         return false
     end

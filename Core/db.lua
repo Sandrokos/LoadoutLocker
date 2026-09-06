@@ -181,6 +181,32 @@ local function InvalidateLoadoutListCache()
     end
 end
 
+local CURRENT_GEAR_SCHEMA = 4
+
+local function EnsureGearSetStore()
+    LoadoutLockerDB.gearSets = LoadoutLockerDB.gearSets or {}
+    LoadoutLockerDB.nextGearSetID = LoadoutLockerDB.nextGearSetID or 1
+end
+
+local function AllocateGearSetID()
+    EnsureGearSetStore()
+    local id = LoadoutLockerDB.nextGearSetID
+    LoadoutLockerDB.nextGearSetID = id + 1
+    return id
+end
+
+local function IterLoadoutEntries(callback)
+    for specID, specData in pairs(LoadoutLockerDB) do
+        if type(specID) == "number" and type(specData) == "table" then
+            for configID, entry in pairs(specData) do
+                if type(configID) == "number" and type(entry) == "table" then
+                    callback(specID, configID, entry)
+                end
+            end
+        end
+    end
+end
+
 local function SetDefaultLoadoutRef(storeKey, collectionKey, specID, configID)
     local store = EnsureGlobalAssignmentStore(storeKey, collectionKey)
     if specID and configID then
@@ -307,6 +333,7 @@ function DB:Initialize()
         LoadoutLockerAccountDB.onboardingComplete = nil
     end
     self:GetTertiaryPriority()
+    self:MigrateGearSets()
 end
 
 DefineContentAssignments({
@@ -514,8 +541,8 @@ function DB:MoveTertiaryPriority(field, direction)
 end
 
 function DB:GetIgnoredUpgradeSlots(specID, configID)
-    local entry = self:GetEntry(specID, configID)
-    return entry and entry.ignoredUpgradeSlots
+    local rec = self:GetGearSetRecord(specID, configID)
+    return rec and rec.ignoredUpgradeSlots
 end
 
 function DB:IsUpgradeSlotIgnored(specID, configID, invSlot)
@@ -543,38 +570,38 @@ function DB:GetIgnoredUpgradeSlotList(specID, configID)
 end
 
 function DB:SetIgnoredUpgradeSlot(specID, configID, invSlot)
-    local entry = self:GetEntry(specID, configID)
-    if not entry then
+    local rec = self:GetGearSetRecord(specID, configID)
+    if not rec then
         return false
     end
 
-    entry.ignoredUpgradeSlots = entry.ignoredUpgradeSlots or {}
-    entry.ignoredUpgradeSlots[NormalizeInvSlot(invSlot)] = true
+    rec.ignoredUpgradeSlots = rec.ignoredUpgradeSlots or {}
+    rec.ignoredUpgradeSlots[NormalizeInvSlot(invSlot)] = true
     return true
 end
 
 function DB:ClearIgnoredUpgradeSlot(specID, configID, invSlot)
-    local entry = self:GetEntry(specID, configID)
-    if not entry or not entry.ignoredUpgradeSlots then
+    local rec = self:GetGearSetRecord(specID, configID)
+    if not rec or not rec.ignoredUpgradeSlots then
         return false
     end
 
-    entry.ignoredUpgradeSlots[NormalizeInvSlot(invSlot)] = nil
+    rec.ignoredUpgradeSlots[NormalizeInvSlot(invSlot)] = nil
 
-    if not next(entry.ignoredUpgradeSlots) then
-        entry.ignoredUpgradeSlots = nil
+    if not next(rec.ignoredUpgradeSlots) then
+        rec.ignoredUpgradeSlots = nil
     end
 
     return true
 end
 
 function DB:ClearAllIgnoredUpgradeSlots(specID, configID)
-    local entry = self:GetEntry(specID, configID)
-    if not entry or not entry.ignoredUpgradeSlots then
+    local rec = self:GetGearSetRecord(specID, configID)
+    if not rec or not rec.ignoredUpgradeSlots then
         return false
     end
 
-    entry.ignoredUpgradeSlots = nil
+    rec.ignoredUpgradeSlots = nil
     return true
 end
 
@@ -584,12 +611,12 @@ function DB:GetAllSavedGearEntries()
     for specID, specData in pairs(LoadoutLockerDB) do
         if type(specID) == "number" and type(specData) == "table" then
             for configID, entry in pairs(specData) do
-                if type(configID) == "number" and type(entry) == "table" and entry.gear then
+                if type(configID) == "number" and type(entry) == "table" and self:HasGearSet(specID, configID) then
                     list[#list + 1] = {
                         specID = specID,
                         configID = configID,
                         name = LoadoutLocker.Loadout.ResolveLoadoutName(configID, entry.loadoutName),
-                        equipmentSetName = entry.equipmentSetName,
+                        equipmentSetName = self:GetEquipmentSetName(specID, configID),
                     }
                 end
             end
@@ -609,17 +636,65 @@ function DB:GetEntry(specID, configID)
     return specData and specData[configID]
 end
 
-function DB:GetGearSet(specID, configID)
+function DB:CountLoadoutsUsingGearSet(gearSetID)
+    if not gearSetID then
+        return 0
+    end
+
+    local n = 0
+    IterLoadoutEntries(function(_, _, entry)
+        if entry.gearSetID == gearSetID then
+            n = n + 1
+        end
+    end)
+    return n
+end
+
+function DB:NeedsSharedSavePrompt(specID, configID)
     local entry = self:GetEntry(specID, configID)
-    return entry and entry.gear
+    local id = entry and entry.gearSetID
+    return self:CountLoadoutsUsingGearSet(id) > 1
+end
+
+function DB:GetGearSetRecord(specID, configID)
+    local entry = self:GetEntry(specID, configID)
+    local id = entry and entry.gearSetID
+    local rec = id and LoadoutLockerDB.gearSets and LoadoutLockerDB.gearSets[id]
+    if not rec then
+        return nil
+    end
+    rec.id = rec.id or id
+    return rec
+end
+
+function DB:GetGearSet(specID, configID)
+    local rec = self:GetGearSetRecord(specID, configID)
+    return rec and rec.gear
 end
 
 function DB:HasGearSet(specID, configID)
     return self:GetGearSet(specID, configID) ~= nil
 end
 
+function DB:GetEquipmentSetName(specID, configID)
+    local rec = self:GetGearSetRecord(specID, configID)
+    return rec and rec.equipmentSetName
+end
+
+function DB:SetEquipmentSetName(specID, configID, name)
+    local rec = self:GetGearSetRecord(specID, configID)
+    if not rec then
+        return false
+    end
+    rec.equipmentSetName = name
+    return true
+end
+
 function DB:CopyGearSet(gear)
     local copy = {}
+    if not gear then
+        return copy
+    end
 
     for slot, entry in pairs(gear) do
         copy[NormalizeInvSlot(slot)] = NormalizeGearEntry(entry)
@@ -628,17 +703,114 @@ function DB:CopyGearSet(gear)
     return copy
 end
 
+function DB:MigrateGearSets()
+    if (LoadoutLockerDB.schemaVersion or 0) >= CURRENT_GEAR_SCHEMA then
+        EnsureGearSetStore()
+        return
+    end
+
+    EnsureGearSetStore()
+    local groups = {}
+    IterLoadoutEntries(function(specID, configID, entry)
+        if not entry.gear then
+            return
+        end
+
+        local name = entry.equipmentSetName
+        local key
+        if type(name) == "string" and name ~= "" then
+            key = "n:" .. name
+        else
+            key = "u:" .. tostring(specID) .. ":" .. tostring(configID)
+        end
+        groups[key] = groups[key] or {}
+        groups[key][#groups[key] + 1] = {
+            specID = specID,
+            configID = configID,
+            entry = entry,
+        }
+    end)
+
+    for _, rows in pairs(groups) do
+        table.sort(rows, function(a, b)
+            local sa, sb = a.entry.savedAt or 0, b.entry.savedAt or 0
+            if sa ~= sb then
+                return sa > sb
+            end
+            return a.configID > b.configID
+        end)
+
+        local winner = rows[1].entry
+        local id = AllocateGearSetID()
+        LoadoutLockerDB.gearSets[id] = {
+            id = id,
+            gear = self:CopyGearSet(winner.gear),
+            equipmentSetName = winner.equipmentSetName,
+            savedAt = winner.savedAt,
+            ignoredUpgradeSlots = self:CopyIgnoredUpgradeSlots(winner.ignoredUpgradeSlots),
+        }
+
+        for _, row in ipairs(rows) do
+            row.entry.gearSetID = id
+            row.entry.gear = nil
+            row.entry.equipmentSetName = nil
+            row.entry.ignoredUpgradeSlots = nil
+        end
+    end
+
+    LoadoutLockerDB.schemaVersion = CURRENT_GEAR_SCHEMA
+end
+
 function DB:CreateOrUpdateGearSet(specID, configID, gear, loadoutName)
     local specData = self:EnsureSpecTable(specID)
     local existing = specData[configID]
+    local copied = self:CopyGearSet(gear)
+    EnsureGearSetStore()
+
+    local id = existing and existing.gearSetID
+    if not id or not LoadoutLockerDB.gearSets[id] then
+        id = AllocateGearSetID()
+    end
+
+    local rec = LoadoutLockerDB.gearSets[id] or {}
+    rec.id = id
+    rec.gear = copied
+    rec.savedAt = time()
+    LoadoutLockerDB.gearSets[id] = rec
+
     specData[configID] = {
-        gear = self:CopyGearSet(gear),
+        gearSetID = id,
         loadoutName = loadoutName,
         savedAt = time(),
-        ignoredUpgradeSlots = existing and existing.ignoredUpgradeSlots,
-        equipmentSetName = existing and existing.equipmentSetName,
     }
     InvalidateLoadoutListCache()
+end
+
+function DB:ForkGearSet(specID, configID, gear)
+    local existing = self:GetEntry(specID, configID)
+    local rec = self:GetGearSetRecord(specID, configID)
+    local sourceGear = gear or (rec and rec.gear)
+    if not sourceGear then
+        return false
+    end
+
+    EnsureGearSetStore()
+    local id = AllocateGearSetID()
+    LoadoutLockerDB.gearSets[id] = {
+        id = id,
+        gear = self:CopyGearSet(sourceGear),
+        savedAt = time(),
+        ignoredUpgradeSlots = rec and self:CopyIgnoredUpgradeSlots(rec.ignoredUpgradeSlots),
+    }
+
+    local specData = self:EnsureSpecTable(specID)
+    specData[configID] = {
+        gearSetID = id,
+        loadoutName = existing and existing.loadoutName,
+        savedAt = time(),
+    }
+    InvalidateLoadoutListCache()
+    return true
 end
 
 function DB:CopyIgnoredUpgradeSlots(ignored)
@@ -655,19 +827,20 @@ function DB:CopyIgnoredUpgradeSlots(ignored)
 end
 
 function DB:CopyGearSetToLoadout(specID, sourceConfigID, targetConfigID, targetLoadoutName, sourceSpecID)
-    local gear = self:GetGearSet(sourceSpecID or specID, sourceConfigID)
-    if not gear then
+    local sourceEntry = self:GetEntry(sourceSpecID or specID, sourceConfigID)
+    if not sourceEntry or not sourceEntry.gearSetID then
+        return false
+    end
+
+    if not self:HasGearSet(sourceSpecID or specID, sourceConfigID) then
         return false
     end
 
     local specData = self:EnsureSpecTable(specID)
-    local sourceEntry = self:GetEntry(sourceSpecID or specID, sourceConfigID)
     specData[targetConfigID] = {
-        gear = self:CopyGearSet(gear),
+        gearSetID = sourceEntry.gearSetID,
         loadoutName = targetLoadoutName,
         savedAt = time(),
-        ignoredUpgradeSlots = sourceEntry and self:CopyIgnoredUpgradeSlots(sourceEntry.ignoredUpgradeSlots),
-        equipmentSetName = sourceEntry and sourceEntry.equipmentSetName,
     }
     InvalidateLoadoutListCache()
     return true
@@ -680,9 +853,19 @@ function DB:DeleteGearSet(specID, configID)
         return nil
     end
 
+    local rec = self:GetGearSetRecord(specID, configID)
+    local payload = {
+        loadoutName = entry.loadoutName,
+        equipmentSetName = rec and rec.equipmentSetName,
+        gearSetID = entry.gearSetID,
+    }
+    local id = entry.gearSetID
     specData[configID] = nil
+    if id and self:CountLoadoutsUsingGearSet(id) == 0 and LoadoutLockerDB.gearSets then
+        LoadoutLockerDB.gearSets[id] = nil
+    end
     InvalidateLoadoutListCache()
-    return entry
+    return payload
 end
 
 function DB:GetSpecEntries(specID)

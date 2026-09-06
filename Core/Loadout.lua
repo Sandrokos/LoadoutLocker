@@ -490,7 +490,7 @@ end
 local function HasSavedGear(specID, configID)
     specID = tonumber(specID)
     configID = tonumber(configID)
-    return specID and configID and DB:GetEntry(specID, configID) ~= nil
+    return specID and configID and DB:HasGearSet(specID, configID)
 end
 
 function Loadout.ResolveAssignableRef(overrideRef, defaultRef)

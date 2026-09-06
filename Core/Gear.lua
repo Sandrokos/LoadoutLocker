@@ -994,6 +994,72 @@ local function RequireSpecID(specID)
     return specID
 end
 
+local sharedSaveFrame
+local sharedSavePending
+
+local function CommitManualSave(specID, configID, loadoutName, snapshot, fork)
+    if fork then
+        DB:ForkGearSet(specID, configID, snapshot)
+    else
+        DB:CreateOrUpdateGearSet(specID, configID, snapshot, loadoutName)
+    end
+    EquipmentSet.SyncForLoadout(specID, configID, loadoutName)
+    Print(string.format("Saved gear for %s.", loadoutName))
+    RefreshUI()
+end
+
+local function EnsureSharedSaveFrame()
+    if sharedSaveFrame then
+        return sharedSaveFrame
+    end
+
+    local Widgets = LoadoutLocker.MenuWidgets
+    local frame = Widgets.CreateDialogFrame({
+        name = "LoadoutLockerSharedSavePrompt",
+        title = "Shared Gear Set",
+        width = 420,
+        height = 140,
+        onClose = function(dialog)
+            sharedSavePending = nil
+            dialog:Hide()
+        end,
+    })
+    frame.body = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    frame.body:SetPoint("TOP", frame.title, "BOTTOM", 0, -16)
+    frame.body:SetWidth(380)
+    frame.body:SetWordWrap(true)
+    frame.body:SetJustifyH("CENTER")
+
+    frame.updateButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    frame.updateButton:SetSize(150, 22)
+    frame.updateButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOM", -8, 16)
+    frame.updateButton:SetText("Update shared set")
+    frame.updateButton:SetScript("OnClick", function()
+        local pending = sharedSavePending
+        sharedSavePending = nil
+        frame:Hide()
+        if pending then
+            CommitManualSave(pending.specID, pending.configID, pending.name, pending.snapshot, false)
+        end
+    end)
+
+    frame.forkButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    frame.forkButton:SetSize(150, 22)
+    frame.forkButton:SetPoint("BOTTOMLEFT", frame, "BOTTOM", 8, 16)
+    frame.forkButton:SetText("Save as new set")
+    frame.forkButton:SetScript("OnClick", function()
+        local pending = sharedSavePending
+        sharedSavePending = nil
+        frame:Hide()
+        if pending then
+            CommitManualSave(pending.specID, pending.configID, pending.name, pending.snapshot, true)
+        end
+    end)
+
+    sharedSaveFrame = frame
+    return frame
+end
+
 function Gear.Save(specID, configID)
     local context = Loadout.GetActive(specID)
     if not context then
@@ -1012,10 +1078,27 @@ function Gear.Save(specID, configID)
         return false
     end
 
-    DB:CreateOrUpdateGearSet(context.specID, context.configID, SnapshotEquippedGear(), context.name)
-    EquipmentSet.SyncForLoadout(context.specID, context.configID, context.name)
-    Print(string.format("Saved gear for %s.", context.name))
-    RefreshUI()
+    if sharedSavePending then
+        return false
+    end
+
+    local snapshot = SnapshotEquippedGear()
+    if DB:NeedsSharedSavePrompt(context.specID, context.configID) then
+        local entry = DB:GetEntry(context.specID, context.configID)
+        local count = DB:CountLoadoutsUsingGearSet(entry and entry.gearSetID)
+        local frame = EnsureSharedSaveFrame()
+        frame.body:SetText("This gear is used by " .. count .. " loadouts.")
+        sharedSavePending = {
+            specID = context.specID,
+            configID = context.configID,
+            name = context.name,
+            snapshot = snapshot,
+        }
+        frame:Show()
+        return true
+    end
+
+    CommitManualSave(context.specID, context.configID, context.name, snapshot, false)
     return true
 end
 
